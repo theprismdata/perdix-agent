@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.vsix
+**/.omc/*
+!**/.omc/skills/
+.codepilot/
+.perdix/

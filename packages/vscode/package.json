@@ -1,0 +1,29 @@
+{
+  "name": "perdix-vscode",
+  "displayName": "Perdix",
+  "version": "0.0.0",
+  "private": true,
+  "publisher": "perdix",
+  "main": "./dist/extension.cjs",
+  "engines": { "vscode": "^1.95.0" },
+  "extensionKind": ["workspace"],
+  "activationEvents": [],
+  "contributes": {
+    "commands": [{ "command": "perdix.open", "title": "Perdix: Open" }]
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.95.0",
+    "eslint": "^9.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.0.0"
+  }
+}

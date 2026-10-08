@@ -1,0 +1,694 @@
+"""ACP 에이전트 어댑터 (m1.md §5, protocol.md §1).
+
+ACP 요청을 세션 런타임 상태(모드·모델·권한 정책)와 `SessionRunner`로 연결한다.
+에이전트 로직은 하네스에 있고, 이 모듈은 와이어 변환과 세션 수명 관리만 한다.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Final, Literal, cast
+
+from acp import PROTOCOL_VERSION, RequestError
+from acp.helpers import (
+    image_block,
+    update_agent_message_text,
+    update_current_mode,
+    update_user_message,
+    update_user_message_text,
+)
+from acp.interfaces import Client
+from acp.schema import (
+    AcpMcpServer,
+    AgentCapabilities,
+    AllowedOutcome,
+    AudioContentBlock,
+    AuthenticateResponse,
+    BlobResourceContents,
+    ClientCapabilities,
+    ConfigOptionUpdate,
+    EmbeddedResourceContentBlock,
+    ForkSessionResponse,
+    HttpMcpServer,
+    ImageContentBlock,
+    Implementation,
+    InitializeResponse,
+    ListSessionsResponse,
+    LoadSessionResponse,
+    McpServerStdio,
+    NewSessionResponse,
+    PermissionOption,
+    PromptCapabilities,
+    PromptResponse,
+    ResourceContentBlock,
+    ResumeSessionResponse,
+    SessionCapabilities,
+    SessionConfigOptionSelect,
+    SessionConfigSelectOption,
+    SessionInfo,
+    SessionListCapabilities,
+    SessionMode,
+    SessionModeState,
+    SetSessionConfigOptionResponse,
+    SetSessionModeResponse,
+    SseMcpServer,
+    TextContentBlock,
+    TextResourceContents,
+    ToolCallUpdate,
+)
+
+from perdix import __version__
+from perdix.acp.mapping import to_session_update
+from perdix.config.credentials import load_credentials
+from perdix.config.schema import ServerConfig
+from perdix.context.builder import build_system_prompt
+from perdix.context.messages import (
+    ContentBlock,
+    ImageBlock,
+    TextBlock,
+    ToolUseItem,
+)
+from perdix.harness.budget import Budget
+from perdix.harness.events import (
+    HarnessEvent,
+    PermissionOptionKind,
+    PermissionOutcome,
+    PermissionRequest,
+    ToolFailed,
+    ToolFinished,
+    ToolStarted,
+)
+from perdix.harness.hooks import HookBus
+from perdix.harness.modes import MODES, Mode
+from perdix.harness.runner import SessionRunner, TurnBusyError
+from perdix.harness.turn import TurnRunner, tool_title
+from perdix.llm import catalog
+from perdix.llm.anthropic import AnthropicProvider
+from perdix.llm.base import Provider, ProviderError
+from perdix.llm.fake import FakeProvider
+from perdix.llm.openai import OpenAIProvider
+from perdix.permissions.policy import PermissionMode, PermissionPolicy
+from perdix.sandbox.local import LocalBackend
+from perdix.session.recovery import repair_unpaired_tool_uses
+from perdix.session.store import Event, EventStore, ModeChangePayload, SessionRecord
+from perdix.tools.base import ToolKind, ToolOutput
+from perdix.tools.registry import ToolRegistry, builtin_tools
+
+logger = logging.getLogger(__name__)
+
+McpServer = HttpMcpServer | SseMcpServer | AcpMcpServer | McpServerStdio
+PromptBlock = (
+    TextContentBlock
+    | ImageContentBlock
+    | AudioContentBlock
+    | ResourceContentBlock
+    | EmbeddedResourceContentBlock
+)
+
+DEFAULT_MODE: Final = "chat"
+MODEL_CONFIG_ID: Final = "model"
+# 오른쪽일수록 엄격하다. `_meta.perdix.permissionMode`는 argv보다 완화할 수 없다.
+PERMISSION_STRICTNESS: Final[dict[PermissionMode, int]] = {
+    "interactive": 0,
+    "accept-edits": 1,
+    "allowlist": 2,
+    "deny": 3,
+}
+_OPTION_NAMES: Final[dict[PermissionOptionKind, str]] = {
+    "allow_once": "Allow once",
+    "allow_always": "Allow always",
+    "reject_once": "Reject once",
+    "reject_always": "Reject always",
+}
+
+
+@dataclass
+class _SessionState:
+    """세션별 런타임 상태. 다음 Turn부터 반영된다."""
+
+    id: str
+    cwd: Path
+    mode: Mode
+    model: str
+    permission_mode: PermissionMode
+    policy: PermissionPolicy
+
+
+def stricter_permission_mode(base: PermissionMode, requested: Any) -> PermissionMode:
+    """`requested`가 `base`보다 엄격하거나 같으면 그것을, 아니면 `base`를 쓴다."""
+    if requested not in PERMISSION_STRICTNESS:
+        return base
+    req = cast(PermissionMode, requested)
+    if PERMISSION_STRICTNESS[req] >= PERMISSION_STRICTNESS[base]:
+        return req
+    logger.warning("ignoring looser permissionMode %r (server is %r)", req, base)
+    return base
+
+
+def to_content_blocks(prompt: list[PromptBlock]) -> list[ContentBlock]:
+    """ACP 프롬프트 블록 → 내부 ContentBlock. 오디오는 지원하지 않아 버린다."""
+    blocks: list[ContentBlock] = []
+    for block in prompt:
+        if isinstance(block, TextContentBlock):
+            blocks.append(TextBlock(text=block.text))
+        elif isinstance(block, ImageContentBlock):
+            blocks.append(ImageBlock(media_type=block.mime_type, data=block.data))
+        elif isinstance(block, ResourceContentBlock):
+            blocks.append(TextBlock(text=f"[resource: {block.uri}]"))
+        elif isinstance(block, EmbeddedResourceContentBlock):
+            resource = block.resource
+            if isinstance(resource, TextResourceContents):
+                blocks.append(TextBlock(text=f"[resource: {resource.uri}]\n{resource.text}"))
+            elif isinstance(resource, BlobResourceContents):
+                blocks.append(TextBlock(text=f"[binary resource: {resource.uri}]"))
+        else:
+            logger.info("dropping unsupported prompt block: %s", block.type)
+    return blocks
+
+
+def _session_modes(current: str) -> SessionModeState:
+    return SessionModeState(
+        current_mode_id=current,
+        available_modes=[
+            SessionMode(id=m.id, name=m.name, description=m.description) for m in MODES.values()
+        ],
+    )
+
+
+def _model_option(current: str) -> SessionConfigOptionSelect:
+    options = [
+        SessionConfigSelectOption(value=m.id, name=m.id, description=f"provider: {m.provider}")
+        for m in catalog.all_models()
+    ]
+    if current not in {o.value for o in options}:
+        options.append(SessionConfigSelectOption(value=current, name=current))
+    return SessionConfigOptionSelect(
+        id=MODEL_CONFIG_ID,
+        name="Model",
+        category="model",
+        type="select",
+        current_value=current,
+        options=options,
+    )
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat()
+
+
+class PerdixAgent:
+    """`acp.Agent` 구현. `acp.run_agent(PerdixAgent(config), use_unstable_protocol=True)`."""
+
+    def __init__(self, config: ServerConfig) -> None:
+        self.config = config
+        self._conn: Client | None = None
+        self._store: EventStore | None = None
+        self._store_lock = asyncio.Lock()
+        self._sessions: dict[str, _SessionState] = {}
+        self._runner = SessionRunner(self._make_turn_runner)
+        self._registry = ToolRegistry(builtin_tools())
+        self._sandbox = LocalBackend()
+        self._providers: dict[str, Provider] = {}
+        self._credentials = load_credentials(config.credentials_path)
+        self._fake: FakeProvider | None = None
+        if config.provider == "fake":
+            if config.fake_script is None:
+                raise ValueError("--provider fake requires --fake-script PATH")
+            self._fake = FakeProvider.from_file(config.fake_script)
+        self.client_capabilities: ClientCapabilities | None = None
+        # initialize 요청의 `_meta.perdix`와 clientCapabilities의 `_meta.perdix`
+        self.client_perdix_meta: dict[str, Any] = {}
+
+    # ------------------------------------------------------------ 내부 도우미
+
+    async def _get_store(self) -> EventStore:
+        async with self._store_lock:
+            if self._store is None:
+                self._store = await EventStore.open(self.config.db_path)
+            return self._store
+
+    async def aclose(self) -> None:
+        if self._store is not None:
+            await self._store.close()
+            self._store = None
+
+    def _provider_name_for(self, model: str) -> str:
+        """카탈로그에 없는 모델은 `--provider` 설정값을 그대로 쓴다."""
+        try:
+            return catalog.get(model).provider
+        except KeyError:
+            return self.config.provider
+
+    def _provider_for(self, model: str) -> Provider:
+        if self._fake is not None:
+            return self._fake
+        provider = self._providers.get(model)
+        if provider is None:
+            if self._provider_name_for(model) == "openai":
+                provider = OpenAIProvider(model, api_key=self._credentials.api_key("openai"))
+            else:
+                provider = AnthropicProvider(
+                    model,
+                    api_key=self._credentials.api_key("anthropic"),
+                    auth_token=self._credentials.auth_token("anthropic"),
+                )
+            self._providers[model] = provider
+        return provider
+
+    def _effort_for(self, model: str) -> str | None:
+        try:
+            supports = catalog.get(model).supports_effort
+        except KeyError:
+            supports = False
+        return self.config.effort if supports else None
+
+    def _make_turn_runner(self, session_id: str) -> TurnRunner:
+        state = self._sessions[session_id]
+        assert self._store is not None
+        return TurnRunner(
+            store=self._store,
+            provider=self._provider_for(state.model),
+            registry=self._registry,
+            policy=state.policy,
+            sandbox=self._sandbox,
+            budget=Budget(),
+            hooks=HookBus(),
+            mode=state.mode,
+            cwd=state.cwd,
+            system_prompt_builder=build_system_prompt,
+            model=state.model,
+            max_tokens=self.config.max_tokens,
+            effort=self._effort_for(state.model),
+            provider_factory=self._provider_for,
+        )
+
+    def _state(self, session_id: str) -> _SessionState:
+        state = self._sessions.get(session_id)
+        if state is None:
+            raise RequestError.invalid_params(
+                {"sessionId": session_id, "reason": "unknown session (call session/load first)"}
+            )
+        return state
+
+    def _tool_kind(self, name: str) -> ToolKind:
+        tool = self._registry.get(name)
+        return tool.kind if tool is not None else "other"
+
+    async def _notify(self, session_id: str, event: HarnessEvent) -> None:
+        update = to_session_update(event)
+        if update is None or self._conn is None:
+            return
+        try:
+            await self._conn.session_update(session_id=session_id, update=update)
+        except Exception:
+            logger.exception("session/update failed for %s", session_id)
+
+    # ------------------------------------------------------------ 연결/초기화
+
+    def on_connect(self, conn: Client) -> None:
+        self._conn = conn
+
+    async def initialize(
+        self,
+        protocol_version: int,
+        client_capabilities: ClientCapabilities | None = None,
+        client_info: Implementation | None = None,
+        **kwargs: Any,
+    ) -> InitializeResponse:
+        self.client_capabilities = client_capabilities
+        meta: dict[str, Any] = {}
+        caps_meta = client_capabilities.field_meta if client_capabilities else None
+        if caps_meta and isinstance(caps_meta.get("perdix"), dict):
+            meta.update(caps_meta["perdix"])
+        if isinstance(kwargs.get("perdix"), dict):
+            meta.update(kwargs["perdix"])
+        self.client_perdix_meta = meta
+        await self._get_store()
+        return InitializeResponse(
+            protocol_version=min(protocol_version, PROTOCOL_VERSION),
+            agent_capabilities=AgentCapabilities(
+                load_session=True,
+                prompt_capabilities=PromptCapabilities(image=True, embedded_context=True),
+                session_capabilities=SessionCapabilities(list=SessionListCapabilities()),
+            ),
+            agent_info=Implementation(name="perdix", version=__version__),
+        )
+
+    async def authenticate(self, method_id: str, **kwargs: Any) -> AuthenticateResponse | None:
+        return AuthenticateResponse()
+
+    # ------------------------------------------------------------ 세션
+
+    async def new_session(
+        self,
+        cwd: str,
+        additional_directories: list[str] | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        **kwargs: Any,
+    ) -> NewSessionResponse:
+        overrides = kwargs.get("perdix")
+        meta: dict[str, Any] = overrides if isinstance(overrides, dict) else {}
+        mode_id = meta.get("mode", DEFAULT_MODE)
+        if mode_id not in MODES:
+            raise RequestError.invalid_params({"mode": mode_id, "reason": "unknown mode"})
+        model = meta.get("model", self.config.model)
+        if not isinstance(model, str) or not model:
+            raise RequestError.invalid_params({"model": model, "reason": "invalid model"})
+        permission_mode = stricter_permission_mode(
+            self.config.permission_mode, meta.get("permissionMode")
+        )
+
+        store = await self._get_store()
+        record = await store.create_session(
+            project_path=cwd, mode=mode_id, provider=self.config.provider, model=model
+        )
+        if permission_mode != self.config.permission_mode:
+            await store.append(
+                record.id,
+                "config_change",
+                {"key": "permission_mode", "value": permission_mode},
+            )
+        self._sessions[record.id] = _SessionState(
+            id=record.id,
+            cwd=Path(cwd),
+            mode=MODES[mode_id],
+            model=model,
+            permission_mode=permission_mode,
+            policy=PermissionPolicy(mode=permission_mode),
+        )
+        return NewSessionResponse(
+            session_id=record.id,
+            modes=_session_modes(mode_id),
+            config_options=[_model_option(model)],
+        )
+
+    async def load_session(
+        self,
+        cwd: str,
+        session_id: str,
+        mcp_servers: list[McpServer] | None = None,
+        additional_directories: list[str] | None = None,
+        **kwargs: Any,
+    ) -> LoadSessionResponse | None:
+        # 복구·상태 복원·리플레이 전체를 Turn과 같은 세션 락 안에서 한다.
+        # 본문은 TurnBusyError를 던지지 않으므로 여기서 잡히는 것은 락 획득 실패뿐이다.
+        try:
+            async with self._runner.guard(session_id):
+                return await self._load_locked(session_id, cwd)
+        except TurnBusyError as exc:
+            raise RequestError.invalid_request(
+                {"sessionId": session_id, "reason": "turn in progress"}
+            ) from exc
+
+    async def _load_locked(self, session_id: str, cwd: str) -> LoadSessionResponse:
+        store = await self._get_store()
+        record = await store.get_session(session_id)
+        if record is None:
+            raise RequestError.invalid_params({"sessionId": session_id, "reason": "not found"})
+
+        await self._recover(store, session_id)
+        events = await store.events(session_id)
+        self._sessions[session_id] = self._restore_state(record, events, cwd)
+        await self._replay(session_id, events)
+        return LoadSessionResponse(
+            modes=_session_modes(self._sessions[session_id].mode.id),
+            config_options=[_model_option(self._sessions[session_id].model)],
+        )
+
+    async def _recover(self, store: EventStore, session_id: str) -> None:
+        """harness-loop.md §3.4: 결과 없는 tool_use에 오류 결과를 새 레코드로 append."""
+        count = await repair_unpaired_tool_uses(store, session_id)
+        if count:
+            logger.info("recovered %d unpaired tool_use(s) in %s", count, session_id)
+
+    def _restore_state(self, record: SessionRecord, events: list[Event], cwd: str) -> _SessionState:
+        mode_id = record.mode if record.mode in MODES else DEFAULT_MODE
+        permission_mode = self.config.permission_mode
+        uses: dict[str, ToolUseItem] = {}
+        for ev in events:
+            if ev.kind == "config_change":
+                change = ev.as_config_change()
+                if change.key == "permission_mode":
+                    permission_mode = stricter_permission_mode(
+                        self.config.permission_mode, change.value
+                    )
+            elif ev.kind == "assistant_message":
+                for use in ev.as_assistant_message().tool_uses():
+                    uses[use.id] = use
+        policy = PermissionPolicy(mode=permission_mode)
+        # allow_always / reject_always는 재개 후에도 유지한다(harness-loop.md §7).
+        for ev in events:
+            if ev.kind != "permission_decision":
+                continue
+            decision = ev.as_permission_decision()
+            remembered: Literal["allow", "deny"] | None = (
+                "allow"
+                if decision.decision == "allow_always"
+                else "deny"
+                if decision.decision == "reject_always"
+                else None
+            )
+            if remembered is None:
+                continue
+            prior = uses.get(decision.tool_use_id)
+            policy.remember(decision.tool_name, prior.input if prior else {}, remembered)
+        return _SessionState(
+            id=record.id,
+            cwd=Path(cwd or record.project_path),
+            mode=MODES[mode_id],
+            model=record.model,
+            permission_mode=permission_mode,
+            policy=policy,
+        )
+
+    async def _replay(self, session_id: str, events: list[Event]) -> None:
+        """event log → session/update 리플레이. synthetic user 메시지는 제외한다."""
+        if self._conn is None:
+            return
+        uses: dict[str, ToolUseItem] = {}
+        announced: set[str] = set()
+        for ev in sorted(events, key=lambda e: e.seq):
+            if ev.kind == "user_message":
+                message = ev.as_user_message()
+                if message.origin != "user":
+                    continue
+                for block in message.content:
+                    if isinstance(block, TextBlock):
+                        await self._send(session_id, update_user_message_text(block.text))
+                    else:
+                        image = image_block(block.data, block.media_type)
+                        await self._send(session_id, update_user_message(image))
+            elif ev.kind == "assistant_message":
+                assistant = ev.as_assistant_message()
+                for use in assistant.tool_uses():
+                    uses[use.id] = use
+                text = assistant.text()
+                if text:
+                    await self._send(session_id, update_agent_message_text(text))
+            elif ev.kind == "tool_started":
+                started = ev.as_tool_started()
+                await self._announce_tool(session_id, started.tool_use_id, started.name, uses)
+                announced.add(started.tool_use_id)
+            elif ev.kind == "tool_result":
+                result = ev.as_tool_result()
+                if result.tool_use_id not in announced:
+                    prior = uses.get(result.tool_use_id)
+                    await self._announce_tool(
+                        session_id, result.tool_use_id, prior.name if prior else "tool", uses
+                    )
+                    announced.add(result.tool_use_id)
+                finished: HarnessEvent
+                if result.is_error:
+                    finished = ToolFailed(tool_use_id=result.tool_use_id, reason=result.content)
+                else:
+                    finished = ToolFinished(
+                        tool_use_id=result.tool_use_id,
+                        output=ToolOutput(
+                            content=result.content, is_error=False, display=result.display
+                        ),
+                    )
+                await self._notify(session_id, finished)
+
+    async def _announce_tool(
+        self, session_id: str, tool_use_id: str, name: str, uses: dict[str, ToolUseItem]
+    ) -> None:
+        use = uses.get(tool_use_id)
+        tool_input = use.input if use is not None else {}
+        await self._notify(
+            session_id,
+            ToolStarted(
+                tool_use_id=tool_use_id,
+                name=name,
+                kind=self._tool_kind(name),
+                title=tool_title(name, tool_input),
+                input=tool_input,
+            ),
+        )
+
+    async def _send(self, session_id: str, update: Any) -> None:
+        if self._conn is None:
+            return
+        try:
+            await self._conn.session_update(session_id=session_id, update=update)
+        except Exception:
+            logger.exception("session/update failed for %s", session_id)
+
+    async def list_sessions(
+        self, cwd: str | None = None, cursor: str | None = None, **kwargs: Any
+    ) -> ListSessionsResponse:
+        store = await self._get_store()
+        records = await store.list_sessions(cwd)
+        return ListSessionsResponse(
+            sessions=[
+                SessionInfo(
+                    session_id=r.id,
+                    cwd=r.project_path,
+                    title=r.title,
+                    updated_at=_iso(r.updated_at),
+                )
+                for r in records
+            ]
+        )
+
+    async def set_session_mode(
+        self, session_id: str, mode_id: str, **kwargs: Any
+    ) -> SetSessionModeResponse | None:
+        state = self._state(session_id)
+        mode = MODES.get(mode_id)
+        if mode is None:
+            raise RequestError.invalid_params({"modeId": mode_id, "reason": "unknown mode"})
+        state.mode = mode
+        store = await self._get_store()
+        await store.update_session(session_id, mode=mode_id)
+        await store.append(session_id, "mode_change", ModeChangePayload(mode=mode_id))
+        await self._send(session_id, update_current_mode(mode_id))
+        return SetSessionModeResponse()
+
+    async def set_config_option(
+        self, config_id: str, session_id: str, value: str | bool, **kwargs: Any
+    ) -> SetSessionConfigOptionResponse | None:
+        state = self._state(session_id)
+        if config_id != MODEL_CONFIG_ID:
+            raise RequestError.invalid_params({"configId": config_id, "reason": "unknown option"})
+        allowed = {m.id for m in catalog.all_models()} | {state.model}
+        if not isinstance(value, str) or value not in allowed:
+            raise RequestError.invalid_params({"value": value, "reason": "unknown model"})
+        state.model = value
+        store = await self._get_store()
+        await store.update_session(session_id, model=value)
+        await store.append(session_id, "config_change", {"key": "model", "value": value})
+        options = [_model_option(value)]
+        await self._send(
+            session_id,
+            ConfigOptionUpdate(session_update="config_option_update", config_options=list(options)),
+        )
+        return SetSessionConfigOptionResponse(config_options=list(options))
+
+    # ------------------------------------------------------------ Turn
+
+    async def prompt(
+        self, session_id: str, prompt: list[PromptBlock], **kwargs: Any
+    ) -> PromptResponse:
+        self._state(session_id)
+        await self._get_store()
+        blocks = to_content_blocks(prompt)
+
+        async def sink(event: HarnessEvent) -> None:
+            await self._notify(session_id, event)
+
+        async def ask_permission(req: PermissionRequest) -> PermissionOutcome:
+            return await self._ask_permission(session_id, req)
+
+        try:
+            result = await self._runner.prompt(
+                session_id, blocks, sink=sink, ask_permission=ask_permission
+            )
+        except TurnBusyError as exc:
+            raise RequestError(-32600, str(exc), {"sessionId": session_id}) from exc
+        except ProviderError as exc:
+            raise RequestError(
+                -32603,
+                f"provider error: {exc}",
+                {"retryable": exc.retryable, "status": exc.status},
+            ) from exc
+        meta = (
+            {"perdix": {"verification": result.verification}}
+            if result.verification is not None
+            else None
+        )
+        return PromptResponse(stop_reason=result.stop_reason, field_meta=meta)
+
+    async def _ask_permission(self, session_id: str, req: PermissionRequest) -> PermissionOutcome:
+        if self._conn is None:
+            return PermissionOutcome(outcome="cancelled")
+        options = [
+            PermissionOption(option_id=kind, name=_OPTION_NAMES[kind], kind=kind)
+            for kind in req.options
+        ]
+        tool_call = ToolCallUpdate(
+            tool_call_id=req.tool_use_id,
+            title=req.title,
+            kind=req.kind,
+            status="pending",
+            raw_input=req.input,
+        )
+        try:
+            response = await self._conn.request_permission(
+                session_id=session_id, tool_call=tool_call, options=options
+            )
+        except Exception:
+            logger.exception("session/request_permission failed; treating as reject_once")
+            return PermissionOutcome(outcome="reject_once")
+        outcome = response.outcome
+        if isinstance(outcome, AllowedOutcome):
+            if outcome.option_id in _OPTION_NAMES:
+                return PermissionOutcome(outcome=outcome.option_id)
+            logger.warning("unknown permission option %r; rejecting", outcome.option_id)
+            return PermissionOutcome(outcome="reject_once")
+        return PermissionOutcome(outcome="cancelled")
+
+    async def cancel(self, session_id: str, **kwargs: Any) -> None:
+        # 알림이므로 절대 예외를 던지지 않는다.
+        try:
+            self._runner.cancel(session_id)
+        except Exception:
+            logger.exception("cancel failed for %s", session_id)
+
+    # ------------------------------------------------------------ 미지원 / 확장
+
+    async def fork_session(
+        self,
+        session_id: str,
+        cwd: str,
+        additional_directories: list[str] | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        **kwargs: Any,
+    ) -> ForkSessionResponse:
+        raise RequestError.method_not_found("session/fork")
+
+    async def resume_session(
+        self,
+        session_id: str,
+        cwd: str,
+        additional_directories: list[str] | None = None,
+        mcp_servers: list[McpServer] | None = None,
+        **kwargs: Any,
+    ) -> ResumeSessionResponse:
+        raise RequestError.method_not_found("session/resume")
+
+    async def close_session(self, session_id: str, **kwargs: Any) -> None:
+        raise RequestError.method_not_found("session/close")
+
+    async def ext_method(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+        raise RequestError.method_not_found(f"_{method}")
+
+    async def ext_notification(self, method: str, params: dict[str, Any]) -> None:
+        if method == "perdix/diagnostics":
+            # 클라이언트가 준 진단으로만 취급한다. M1은 기록만 한다.
+            logger.info("client diagnostics received: %d key(s)", len(params))
+            return
+        logger.debug("ignoring unknown extension notification %r", method)
