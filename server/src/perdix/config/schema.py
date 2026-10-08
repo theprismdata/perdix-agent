@@ -35,6 +35,8 @@ class ServerConfig(BaseModel):
     max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, gt=0)
     # provider == "fake"일 때 FakeProvider 스크립트(JSON) 경로
     fake_script: Path | None = None
+    # 서브에이전트 역할별 모델 오버라이드(JSON) 경로 (config/agents.py)
+    agents_config_path: Path | None = None
     log_level: LogLevel = "INFO"
     # 공급자 키 파일. env가 우선한다(config/credentials.py).
     credentials_path: Path = DEFAULT_CREDENTIALS_PATH

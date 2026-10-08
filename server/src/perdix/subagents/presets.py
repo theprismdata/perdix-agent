@@ -10,6 +10,7 @@ from typing import Final, Literal
 
 from pydantic import BaseModel
 
+from perdix.config.agents import AgentsConfig
 from perdix.harness.modes import Mode
 
 PresetId = Literal["explore", "executor", "reviewer", "compactor", "titler"]
@@ -72,12 +73,25 @@ PRESETS: Final[dict[PresetId, SubagentPreset]] = {
 }
 
 
-def get(preset_id: str) -> SubagentPreset:
-    """프리셋 id로 조회. 모르는 id면 KeyError."""
+def get(preset_id: str, agents_config: AgentsConfig | None = None) -> SubagentPreset:
+    """프리셋 id로 조회. 모르는 id면 KeyError.
+
+    `agents_config`에 이 역할 오버라이드가 있으면 model/effort를 교체한다(architecture.md §6.10).
+    """
     try:
-        return PRESETS[preset_id]  # type: ignore[index]
+        base = PRESETS[preset_id]  # type: ignore[index]
     except KeyError:
         raise KeyError(f"unknown subagent preset: {preset_id}") from None
+    if agents_config is None:
+        return base
+    override = agents_config.agents.get(preset_id)
+    if override is None:
+        return base
+    # model과 effort는 한 쌍으로 교체한다. 설정에 effort가 없으면 프리셋 effort를 유지하지 않고
+    # None(effort 미전송)으로 덮어쓴다. 다른 모델에 기존 effort가 맞으리란 보장이 없어서다.
+    return base.model_copy(
+        update={"model": agents_config.resolve(override.model), "effort": override.effort}
+    )
 
 
 def all_presets() -> list[SubagentPreset]:

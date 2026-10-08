@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from perdix.config.agents import AgentsConfig
 from perdix.context.builder import build_system_prompt
 from perdix.context.messages import TextBlock
 from perdix.harness.budget import Budget
@@ -165,3 +166,66 @@ async def test_turn_runner_task_spawns_child_and_returns_text(
     assert len(results) == 1
     assert results[0].payload["is_error"] is False
     assert "entry is main.py" in str(results[0].payload)
+
+
+async def test_turn_runner_task_uses_agents_config_override(
+    store: EventStore, tmp_path: Path
+) -> None:
+    parent = await store.create_session(str(tmp_path), "build", "fake", "parent-model")
+    parent_provider = FakeProvider(
+        [
+            {
+                "tool_uses": [
+                    {
+                        "id": "t1",
+                        "name": "task",
+                        "input": {"preset": "explore", "prompt": "find the entry point"},
+                    }
+                ],
+                "stop": "tool_use",
+            },
+            {"text": "parent done", "stop": "end_turn"},
+        ],
+        model="parent-model",
+    )
+    children: dict[str, FakeProvider] = {}
+
+    def provider_factory(model: str) -> FakeProvider:
+        child = FakeProvider([{"text": "entry is main.py", "stop": "end_turn"}], model=model)
+        children[model] = child
+        return child
+
+    agents_config = AgentsConfig.model_validate(
+        {
+            "models": {"mid": {"provider": "anthropic", "model": "claude-sonnet-5-5"}},
+            "agents": {"explore": {"model": "mid"}},
+        }
+    )
+    runner = TurnRunner(
+        store=store,
+        provider=parent_provider,
+        registry=ToolRegistry(builtin_tools()),
+        policy=PermissionPolicy({"task": "allow"}),
+        sandbox=LocalBackend(),
+        budget=Budget(),
+        hooks=HookBus(),
+        mode=BUILD,
+        cwd=tmp_path,
+        system_prompt_builder=build_system_prompt,
+        model="parent-model",
+        max_tokens=1000,
+        provider_factory=provider_factory,
+        agents_config=agents_config,
+    )
+    result = await runner.run(
+        parent.id,
+        [TextBlock(text="go")],
+        cancel=asyncio.Event(),
+        sink=_ignore,
+        ask_permission=_reject,
+    )
+
+    assert result.stop_reason == "end_turn"
+    assert list(children) == ["claude-sonnet-5-5"]  # 기본(claude-haiku-4-5)이 아니라 설정값
+    child_sessions = [s for s in await store.list_sessions() if s.id != parent.id]
+    assert [s.model for s in child_sessions] == ["claude-sonnet-5-5"]

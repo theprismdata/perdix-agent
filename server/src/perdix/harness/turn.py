@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from pydantic import BaseModel
 
+from perdix.config.agents import AgentsConfig
 from perdix.context.messages import (
     AssistantItem,
     AssistantMessage,
@@ -175,6 +176,7 @@ class TurnRunner:
         sleep: Sleep = asyncio.sleep,
         cancel_grace: float = CANCEL_GRACE_SECONDS,
         provider_factory: ProviderFactory | None = None,
+        agents_config: AgentsConfig | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
@@ -193,6 +195,8 @@ class TurnRunner:
         self._cancel_grace = cancel_grace
         # 서브에이전트 스폰용(task 도구). None이면 이 러너에서는 스폰 불가.
         self.provider_factory = provider_factory
+        # 서브에이전트 프리셋의 역할별 모델 오버라이드(architecture.md §6.10). None이면 기본 표.
+        self.agents_config = agents_config
         # 세션당 하나의 권한 큐(harness-loop.md §3.3 규칙 4). 훅 이후 재평가도 같은 큐를 쓴다.
         self._ask_lock = asyncio.Lock()
 
@@ -651,7 +655,7 @@ class TurnRunner:
         from perdix.subagents.presets import get as get_preset
         from perdix.subagents.spawn import spawn_subagent
 
-        get_preset(preset_id)  # 알 수 없는 프리셋은 KeyError로 일찍 실패
+        get_preset(preset_id, self.agents_config)  # 알 수 없는 프리셋은 KeyError로 일찍 실패
         assert self.provider_factory is not None
         return await spawn_subagent(
             preset_id,
@@ -668,6 +672,7 @@ class TurnRunner:
             system_prompt_builder=self.system_prompt_builder,
             max_tokens=self.max_tokens,
             model=model,
+            agents_config=self.agents_config,
         )
 
     async def _run_cancellable(

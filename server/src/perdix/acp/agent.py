@@ -63,6 +63,7 @@ from acp.schema import (
 
 from perdix import __version__
 from perdix.acp.mapping import to_session_update
+from perdix.config.agents import load_agents_config
 from perdix.config.credentials import load_credentials
 from perdix.config.schema import ServerConfig
 from perdix.context.builder import build_system_prompt
@@ -219,6 +220,7 @@ class PerdixAgent:
             if config.fake_script is None:
                 raise ValueError("--provider fake requires --fake-script PATH")
             self._fake = FakeProvider.from_file(config.fake_script)
+        self._agents_config = load_agents_config(config.agents_config_path)
         self.client_capabilities: ClientCapabilities | None = None
         # initialize 요청의 `_meta.perdix`와 clientCapabilities의 `_meta.perdix`
         self.client_perdix_meta: dict[str, Any] = {}
@@ -284,6 +286,7 @@ class PerdixAgent:
             max_tokens=self.config.max_tokens,
             effort=self._effort_for(state.model),
             provider_factory=self._provider_for,
+            agents_config=self._agents_config,
         )
 
     def _state(self, session_id: str) -> _SessionState:

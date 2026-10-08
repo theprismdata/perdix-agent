@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from perdix.config.agents import AgentsConfig
 from perdix.context.messages import TextBlock, UserMessage
 from perdix.harness.budget import Budget
 from perdix.harness.hooks import HookBus
@@ -164,3 +165,97 @@ async def test_spawn_subagent_model_override(store: EventStore, cwd: Path) -> No
     assert requested == ["claude-sonnet-5-5"]  # 프리셋 기본(claude-haiku-4-5)이 아니라 override
     record = await store.get_session(outcome.session_id)
     assert record is not None and record.model == "claude-sonnet-5-5"
+
+
+# ---------------------------------------------------------------- 역할별 모델 오버라이드 (§6.10)
+
+
+def _agents_config(agents: dict[str, dict[str, str]]) -> AgentsConfig:
+    return AgentsConfig.model_validate(
+        {
+            "models": {"cheap": {"provider": "anthropic", "model": "claude-haiku-4-5"}},
+            "agents": agents,
+        }
+    )
+
+
+def test_preset_override_replaces_model_and_effort() -> None:
+    config = _agents_config({"explore": {"model": "claude-sonnet-5-5", "effort": "low"}})
+    explore = get_preset("explore", config)
+    assert explore.model == "claude-sonnet-5-5"
+    assert explore.effort == "low"
+    assert explore.mode.read_only is True  # 모드는 프리셋 그대로
+    assert get_preset("explore").model == "claude-haiku-4-5"  # 기본 표는 바뀌지 않는다
+
+
+def test_preset_override_resolves_alias_and_clears_effort() -> None:
+    executor = get_preset("executor", _agents_config({"executor": {"model": "cheap"}}))
+    assert executor.model == "claude-haiku-4-5"
+    assert executor.effort is None  # effort 생략은 프리셋 effort 유지가 아니라 None
+
+
+def test_preset_without_override_keeps_default() -> None:
+    config = _agents_config({"executor": {"model": "cheap"}})
+    assert get_preset("explore", config) == get_preset("explore")
+    assert get_preset("explore", None).model == "claude-haiku-4-5"
+    assert get_preset("reviewer", AgentsConfig()).effort == "medium"
+
+
+def test_unknown_preset_raises_even_with_config() -> None:
+    config = _agents_config({"not-a-preset": {"model": "cheap"}})
+    with pytest.raises(KeyError):
+        get_preset("not-a-preset", config)
+
+
+async def test_spawn_subagent_uses_config_override(store: EventStore, cwd: Path) -> None:
+    requested: list[str] = []
+
+    def provider_factory(model: str) -> FakeProvider:
+        requested.append(model)
+        return FakeProvider([{"text": "ok", "stop": "end_turn"}], model=model)
+
+    outcome = await spawn_subagent(
+        "executor",
+        "do it",
+        project_path=str(cwd),
+        cwd=cwd,
+        store=store,
+        registry=ToolRegistry(builtin_tools()),
+        policy=PermissionPolicy(),
+        sandbox=LocalBackend(),
+        budget=Budget(),
+        hooks=HookBus(),
+        provider_factory=provider_factory,
+        agents_config=_agents_config({"executor": {"model": "cheap"}}),
+    )
+
+    assert outcome.stop_reason == "end_turn"
+    assert requested == ["claude-haiku-4-5"]  # 기본(claude-opus-5-5)이 아니라 설정값
+    record = await store.get_session(outcome.session_id)
+    assert record is not None and record.model == "claude-haiku-4-5"
+
+
+async def test_spawn_subagent_explicit_model_beats_config(store: EventStore, cwd: Path) -> None:
+    requested: list[str] = []
+
+    def provider_factory(model: str) -> FakeProvider:
+        requested.append(model)
+        return FakeProvider([{"text": "ok", "stop": "end_turn"}], model=model)
+
+    await spawn_subagent(
+        "executor",
+        "do it",
+        project_path=str(cwd),
+        cwd=cwd,
+        store=store,
+        registry=ToolRegistry(builtin_tools()),
+        policy=PermissionPolicy(),
+        sandbox=LocalBackend(),
+        budget=Budget(),
+        hooks=HookBus(),
+        provider_factory=provider_factory,
+        model="explicit-override",
+        agents_config=_agents_config({"executor": {"model": "cheap"}}),
+    )
+
+    assert requested == ["explicit-override"]

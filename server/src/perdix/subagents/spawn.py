@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from perdix.config.agents import AgentsConfig
 from perdix.context.builder import build_system_prompt
 from perdix.context.messages import AssistantMessage, TextBlock
 from perdix.harness.budget import Budget
@@ -74,10 +75,12 @@ async def spawn_subagent(
     sink: Sink = _ignore_event,
     ask_permission: AskPermission = _deny_ask,
     model: str | None = None,
+    agents_config: AgentsConfig | None = None,
 ) -> SubagentOutcome:
     """`preset_id` 프리셋으로 격리된 하위 세션을 만들어 `task`를 실행하고 결과를 모은다."""
-    preset = get_preset(preset_id)
-    # `model`이 주어지면 프리셋 기본 모델을 덮어쓴다(harness-loop.md §8). effort는 프리셋 그대로.
+    preset = get_preset(preset_id, agents_config)
+    # `model`이 주어지면 프리셋 모델(설정 오버라이드 반영 후)을 덮어쓴다(harness-loop.md §8).
+    # effort는 프리셋 그대로.
     effective_model = model or preset.model
     provider = provider_factory(effective_model)
     record = await store.create_session(

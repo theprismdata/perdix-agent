@@ -35,6 +35,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-tokens", dest="max_tokens", type=int)
     parser.add_argument("--fake-script", dest="fake_script", help="FakeProvider JSON script")
     parser.add_argument(
+        "--agents-config",
+        dest="agents_config_path",
+        help="역할별 모델 오버라이드 JSON 파일 경로 (architecture.md §6.10)",
+    )
+    parser.add_argument(
         "--credentials",
         dest="credentials_path",
         help="API key file (default ~/.perdix/credentials.json)",
@@ -69,6 +74,8 @@ def main() -> None:
         parser.error(messages)
     if config.fake_script is not None and not config.fake_script.is_file():
         parser.error(f"fake script not found: {config.fake_script}")
+    if config.agents_config_path is not None and not config.agents_config_path.is_file():
+        parser.error(f"agents config not found: {config.agents_config_path}")
 
     logging.basicConfig(
         stream=sys.stderr,
