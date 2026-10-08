@@ -91,6 +91,62 @@ API 키 없이 스크립트된 응답으로 테스트하고 싶으면 fake 공�
 (cd server && uv run perdix-server --provider fake --fake-script tests/fixtures/demo.json --db /tmp/perdix.db)
 ```
 
+### 6. 역할별 모델 지정 (서브에이전트)
+
+`task` 도구로 띄우는 서브에이전트(`explore`/`executor`/`reviewer`/`compactor`/`titler`)는 역할마다
+기본 모델이 다르다. 기본값을 바꾸려면 JSON 설정 파일을 만들어 `perdix-server`에 넘긴다.
+
+**기본값** (설정을 안 주면 이대로 동작한다)
+
+| 역할 | 기본 모델 | effort |
+|---|---|---|
+| `explore` | `claude-haiku-4-5` | (없음) |
+| `executor` | `claude-opus-5-5` | `high` |
+| `reviewer` | `claude-sonnet-5-5` | `medium` |
+| `compactor` | `claude-haiku-4-5` | (없음) |
+| `titler` | `claude-haiku-4-5` | (없음) |
+
+이 표는 **서브에이전트만** 적용 대상이다. 메인 대화(지금 응답하고 있는 에이전트)의 모델은
+위에서 설명한 `--model`/`/model`로 따로 바꾼다.
+
+**설정 파일 예시** (`agents.json`)
+
+```json
+{
+  "models": {
+    "strong": { "provider": "anthropic", "model": "claude-opus-5-5" },
+    "cheap":  { "provider": "openai",    "model": "gpt-6-luna" }
+  },
+  "agents": {
+    "executor": { "model": "strong", "effort": "high" },
+    "explore":  { "model": "cheap" }
+  }
+}
+```
+
+- `models`: 모델 별칭 테이블. `agents`에서 별칭 대신 실제 모델 id를 바로 써도 된다.
+- `agents`: 역할 id → `{ "model": ..., "effort": ... }`. 역할을 적으면 모델과 effort를
+  **둘 다 같이** 교체한다(`effort`를 안 쓰면 "effort 없음"이 된다 — 위 기본값의 effort가
+  그대로 유지되는 게 아니다).
+- 적지 않은 역할은 위 기본값 표 그대로 동작한다.
+
+**실행 방법**
+
+서버를 직접 띄울 때:
+
+```bash
+(cd server && uv run perdix-server --agents-config /path/to/agents.json)
+```
+
+`perdix` CLI로 실행할 때는 `--server`로 서버 실행 명령 자체를 바꿔서 전달한다:
+
+```bash
+perdix --server "uv run --project server perdix-server --agents-config /path/to/agents.json"
+```
+
+**우선순위**: 모델이 겹쳐서 정해지면 `task` 도구 호출의 `model` 입력(모델 호출 시 그 자리에서
+준 값) > 이 설정 파일의 오버라이드 > 위 기본값 표, 순서로 이긴다.
+
 ## 개발
 
 ### 처음 한 번 설치
