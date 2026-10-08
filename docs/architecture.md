@@ -183,7 +183,7 @@ perdix-agent/
 | 모드 | 도구 | 검증 게이트 | 용도 |
 |---|---|---|---|
 | `chat` | 전체 | 없음 | 일반 질의응답, 단발 작업 |
-| `plan` | `is_read_only(input)`이 참인 도구 전체(read/grep/glob/ls/webfetch/websearch/session_search/skill/todo/task(explore·reviewer)) | 없음 | 계획 수립, 분석 |
+| `plan` | `is_read_only(input)`이 참인 도구 전체(read/grep/glob/ls/webfetch/websearch/session_search/skill/todo/task(explore·reviewer·security-reviewer)) | 없음 | 계획 수립, 분석 |
 | `build` | 전체 | **있음** | 자율 구현. 완료 조건 만족까지 반복 |
 
 모드는 ACP `session/set_mode`로 전환하고 `session/new` 응답의 `modes`로 광고한다. 모델/공급자 전환은 `session/set_config_option`(category `model`). OpenCode의 build/plan, Kilo의 Code/Architect에 대응.
@@ -244,7 +244,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 ### 6.8 서브에이전트 (`subagents/`)
 - 같은 프로세스 안의 **격리된 하위 세션**. 부모 히스토리는 공유하지 않고 과업 설명만 전달.
 - 프리셋: `explore`(읽기 전용, 저비용 모델), `executor`(쓰기 가능), `reviewer`(읽기 전용, 검증 게이트용).
-- 병렬 스폰은 `explore`/`reviewer`만 허용. `executor`는 직렬(병렬은 git worktree 격리로 2차). 부모 권한 규칙과 예산을 상속한다.
+- 병렬 스폰은 `explore`/`reviewer`/`security-reviewer`만 허용. `executor`/`debugger`는 직렬(병렬은 git worktree 격리로 2차). 부모 권한 규칙과 예산을 상속한다.
 - ACP에는 부모 필드가 없으므로 진행 상황은 부모 `tool_call`의 `content`에 텍스트로 누적하고, `_meta.perdix.parentToolCallId`로 Perdix TUI에서만 중첩 표시.
 
 ### 6.9 프로젝트 신뢰 게이트
@@ -264,6 +264,8 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 | `executor` | `claude-opus-5-5` | `high` | 부모가 쪼개 준 과업이라 main보다 한 단계 낮춰 토큰 절약 |
 | `explore` | `claude-haiku-4-5` | (미지원) | 읽기 전용 탐색·요약. 양이 많고 판단은 얕음 |
 | `reviewer` | `claude-sonnet-5-5` | `medium` | 완료 조건 판정에 판단력이 필요하지만 Opus까지는 과함. 구조화 출력 사용 |
+| `debugger` | `claude-sonnet-5-5` | `medium` | 실패 원인 분석. 재현에 셸이 필요해 executor와 같은 쓰기 가능 등급(권한이 읽기 전용/전체 이분법이라). 직렬 실행 |
+| `security-reviewer` | `claude-sonnet-5-5` | `medium` | 취약점·신뢰 경계 점검. reviewer와 같은 읽기 전용 등급, 병렬 스폰 가능 |
 | `compactor` (히스토리 요약) | `claude-haiku-4-5` | (미지원) | 요약 전용, 빈번 호출 |
 | `titler` (세션 제목, 스킬 추출 등 잡무) | `claude-haiku-4-5` | (미지원) | 단발 저비용 |
 
@@ -277,6 +279,8 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 | `executor` | `gpt-6.1-sol` | `high` | main과 동일 모델로 스타일 일관성 유지 |
 | `explore` | `gpt-6-luna` ($0.10/$0.50) | `low` | 경량. effort `none`도 지원하지만 요약 품질 때문에 low |
 | `reviewer` | `gpt-6.1-sol` | `medium` | 구조화 출력으로 완료 판정 |
+| `debugger` | `gpt-6.1-sol` | `medium` | 원인 분석에 판단력이 필요. 쓰기 가능 등급 |
+| `security-reviewer` | `gpt-6.1-sol` | `medium` | 읽기 전용 보안 검토 |
 | `compactor` | `gpt-6-luna` | `low` | 요약 전용 |
 | `titler` | `gpt-6-luna` | `none` | 단발 잡무 |
 

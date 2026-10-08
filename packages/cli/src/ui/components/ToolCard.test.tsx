@@ -65,6 +65,18 @@ describe("ToolCard", () => {
     expect(frame).toContain("… 10 lines");
   });
 
+  it("renders removed and added lines of an edit diff", () => {
+    const item = tool({
+      toolKind: "edit",
+      status: "completed",
+      content: [{ type: "diff", path: "b.txt", oldText: "a\nold\nz\n", newText: "a\nnew\nz\n" }],
+    });
+    const frame = render(<ToolCard item={item} expanded />).lastFrame() ?? "";
+    expect(frame).toContain("- old");
+    expect(frame).toContain("+ new");
+    expect(frame).toContain("  a");
+  });
+
   it("indents nested cards", () => {
     const top = render(<ToolCard item={tool()} expanded={false} />).lastFrame() ?? "";
     cleanup();

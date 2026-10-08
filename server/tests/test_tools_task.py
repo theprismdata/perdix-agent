@@ -35,6 +35,8 @@ def test_task_read_only_depends_on_preset() -> None:
     assert tool.is_read_only({"preset": "executor", "prompt": "x"}) is False
     assert tool.is_read_only({"preset": "explore", "prompt": "x"}) is True
     assert tool.is_read_only({"preset": "reviewer", "prompt": "x"}) is True
+    assert tool.is_read_only({"preset": "debugger", "prompt": "x"}) is False
+    assert tool.is_read_only({"preset": "security-reviewer", "prompt": "x"}) is True
     assert tool.kind not in READ_ONLY_KINDS
 
 
@@ -46,7 +48,7 @@ def test_task_is_builtin_but_excluded_from_read_only_registry() -> None:
 
 def test_task_schema_hides_internal_presets() -> None:
     enum = TaskTool().input_schema["properties"]["preset"]["enum"]
-    assert set(enum) == {"explore", "executor", "reviewer"}
+    assert set(enum) == {"explore", "executor", "reviewer", "debugger", "security-reviewer"}
 
 
 async def test_task_without_spawn_is_error(tmp_path: Path) -> None:

@@ -36,8 +36,28 @@ def test_presets_match_architecture_table() -> None:
     assert reviewer.effort == "medium"
     assert reviewer.mode.read_only is True
 
+    debugger = get_preset("debugger")
+    assert debugger.model == "claude-sonnet-5-5"
+    assert debugger.effort == "medium"
+    assert debugger.mode.read_only is False
+
+    security = get_preset("security-reviewer")
+    assert security.model == "claude-sonnet-5-5"
+    assert security.effort == "medium"
+    assert security.mode.read_only is True
+
     with pytest.raises(KeyError):
         get_preset("not-a-preset")
+
+
+def test_preset_mode_description_matches_role_description(tmp_path: Path) -> None:
+    from perdix.context.builder import build_system_prompt
+    from perdix.subagents.presets import all_presets
+
+    for preset in all_presets():
+        assert preset.mode.description == preset.description
+    explore = get_preset("explore")
+    assert explore.description in build_system_prompt(tmp_path, explore.mode)
 
 
 @pytest.fixture

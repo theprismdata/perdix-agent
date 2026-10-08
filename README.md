@@ -53,11 +53,13 @@ perdix -p "이 프로젝트 구조를 설명해줘"
 
 ### 3. 대화 중 명령
 
-입력창에 `/`로 시작하는 명령을 입력한다.
+입력창에 `/`로 시작하는 명령을 입력한다. `/`만 쳐도 쓸 수 있는 명령 목록이 팝업으로 뜨고,
+계속 타이핑하면 후보가 좁혀진다. ↑/↓로 선택을 옮기고 Tab이나 Enter로 확정한다. `/agent `,
+`/model ` 뒤에서는 실제 값(`chat`/`plan`/`build`, 모델 목록)도 같은 방식으로 추천된다.
 
 | 명령 | 설명 |
 |---|---|
-| `/mode <id>` | 모드 바꾸기 |
+| `/agent <id>` | 에이전트 모드 바꾸기 (`chat`/`plan`/`build`) — 서브에이전트(아래 6번)와는 다른 개념이다 |
 | `/model <이름>` | 모델 바꾸기 |
 | `/sessions` | 저장된 세션 목록 보기 |
 | `/clear` | 화면 지우기 |
@@ -93,7 +95,7 @@ API 키 없이 스크립트된 응답으로 테스트하고 싶으면 fake 공�
 
 ### 6. 역할별 모델 지정 (서브에이전트)
 
-`task` 도구로 띄우는 서브에이전트(`explore`/`executor`/`reviewer`/`compactor`/`titler`)는 역할마다
+`task` 도구로 띄우는 서브에이전트(`explore`/`executor`/`reviewer`/`debugger`/`security-reviewer`, 내부 전용 `compactor`/`titler`)는 역할마다
 기본 모델이 다르다. 기본값을 바꾸려면 JSON 설정 파일을 만들어 `perdix-server`에 넘긴다.
 
 **기본값** (설정을 안 주면 이대로 동작한다)
@@ -103,13 +105,15 @@ API 키 없이 스크립트된 응답으로 테스트하고 싶으면 fake 공�
 | `explore` | `claude-haiku-4-5` | (없음) |
 | `executor` | `claude-opus-5-5` | `high` |
 | `reviewer` | `claude-sonnet-5-5` | `medium` |
+| `debugger` | `claude-sonnet-5-5` | `medium` |
+| `security-reviewer` | `claude-sonnet-5-5` | `medium` |
 | `compactor` | `claude-haiku-4-5` | (없음) |
 | `titler` | `claude-haiku-4-5` | (없음) |
 
 이 표는 **서브에이전트만** 적용 대상이다. 메인 대화(지금 응답하고 있는 에이전트)의 모델은
 위에서 설명한 `--model`/`/model`로 따로 바꾼다.
 
-**설정 파일 예시** (`agents.json`)
+**설정 파일 예시** ([`agents.example.json`](agents.example.json))
 
 ```json
 {

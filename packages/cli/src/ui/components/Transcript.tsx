@@ -1,20 +1,31 @@
 import { Box, Static, Text } from "ink";
 import type { TranscriptItem } from "../state.js";
+import { theme } from "../theme.js";
 import { ToolCard } from "./ToolCard.js";
+
+const PLAN_STYLE = {
+  completed: { glyph: "☑", color: theme.success },
+  in_progress: { glyph: "▶", color: theme.warning },
+  pending: { glyph: "☐", color: theme.muted },
+} as const;
 
 function ItemView({ item, expanded }: { item: TranscriptItem; expanded: boolean }) {
   switch (item.kind) {
     case "user":
       return (
         <Box marginTop={1}>
-          <Text color="blue" bold>
+          <Text color={theme.userPrefix} bold>
             {"› "}
           </Text>
           <Text>{item.text}</Text>
         </Box>
       );
     case "agent":
-      return <Text>{item.text}</Text>;
+      return (
+        <Box borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor={theme.dim} paddingLeft={1}>
+          <Text>{item.text}</Text>
+        </Box>
+      );
     case "thought":
       return (
         <Text dimColor italic>
@@ -22,18 +33,25 @@ function ItemView({ item, expanded }: { item: TranscriptItem; expanded: boolean 
         </Text>
       );
     case "notice":
-      return <Text color="gray">{item.text}</Text>;
+      return <Text color={theme.muted}>{item.text}</Text>;
     case "error":
-      return <Text color="red">{item.text}</Text>;
+      return <Text color={theme.error}>{item.text}</Text>;
     case "plan":
       return (
         <Box flexDirection="column">
           <Text bold>Plan</Text>
-          {item.entries.map((e, i) => (
-            <Text key={i} dimColor={e.status === "completed"}>
-              {e.status === "completed" ? "☑" : e.status === "in_progress" ? "▶" : "☐"} {e.content}
-            </Text>
-          ))}
+          {item.entries.map((e, i) => {
+            const style = e.status === "completed" || e.status === "in_progress" ? PLAN_STYLE[e.status] : PLAN_STYLE.pending;
+            return (
+              <Text key={i}>
+                <Text color={style.color}>{style.glyph}</Text>
+                <Text color={e.status === "pending" ? theme.muted : undefined} dimColor={e.status === "completed"}>
+                  {" "}
+                  {e.content}
+                </Text>
+              </Text>
+            );
+          })}
         </Box>
       );
     case "tool":

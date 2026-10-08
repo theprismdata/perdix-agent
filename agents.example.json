@@ -1,0 +1,10 @@
+{
+  "models": {
+    "strong": { "provider": "anthropic", "model": "claude-opus-5-5" },
+    "cheap":  { "provider": "openai",    "model": "gpt-6-luna" }
+  },
+  "agents": {
+    "executor": { "model": "strong", "effort": "high" },
+    "explore":  { "model": "cheap" }
+  }
+}

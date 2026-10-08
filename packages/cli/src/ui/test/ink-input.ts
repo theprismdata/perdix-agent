@@ -3,6 +3,7 @@ export const KEY = {
   up: "\u001B[A",
   down: "\u001B[B",
   enter: "\r",
+  tab: "\t",
   escape: "\u001B",
   backspace: "\u007F",
   ctrlC: "\u0003",

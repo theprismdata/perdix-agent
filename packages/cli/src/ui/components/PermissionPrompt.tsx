@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import type { PermissionAnswer, PermissionRequest } from "../../agent/types.js";
+import { theme } from "../theme.js";
 
 /** 단축키 → 옵션 kind. 대문자 N은 "항상 거부". */
 const KEY_TO_KIND: Record<string, string> = {
@@ -56,8 +57,8 @@ export function PermissionPrompt({ request, onAnswer }: PermissionPromptProps) {
   });
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1}>
-      <Text bold color="yellow">
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.warning} paddingX={1}>
+      <Text bold color={theme.warning}>
         Permission required
       </Text>
       <Text>
@@ -68,7 +69,7 @@ export function PermissionPrompt({ request, onAnswer }: PermissionPromptProps) {
         const shortcut = KIND_TO_KEY[opt.kind];
         const active = i === selected;
         return (
-          <Text key={opt.optionId} color={active ? "cyan" : undefined}>
+          <Text key={opt.optionId} color={active ? theme.accent : undefined}>
             {active ? "❯ " : "  "}
             {i + 1}. {opt.name}
             {shortcut ? ` (${shortcut})` : ""}

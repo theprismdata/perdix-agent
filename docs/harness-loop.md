@@ -152,9 +152,9 @@ event log를 읽어:
 
 ## 8. 서브에이전트
 
-- `task` 도구로 스폰. 입력: `preset(explore|executor|reviewer)`, `prompt`, `model?`.
+- `task` 도구로 스폰. 입력: `preset(explore|executor|reviewer|debugger|security-reviewer)`, `prompt`, `model?`.
 - 하위 세션은 부모와 **히스토리를 공유하지 않는다**. 결과는 최종 텍스트 1개로 부모에 반환.
-- **병렬 스폰은 `explore`/`reviewer`만** 허용. `executor`는 직렬 실행이 기본(병렬은 git worktree 격리로 2차).
+- **병렬 스폰은 `explore`/`reviewer`/`security-reviewer`만** 허용. `executor`/`debugger`는 직렬 실행이 기본(병렬은 git worktree 격리로 2차).
 - 자식의 도구 호출은 **항상** 최상위 `tool_call`로 클라이언트에 보낸다(권한 요청이 참조하는 `toolCallId`를 클라이언트가 알아야 하므로). `_meta.perdix.parentToolCallId`를 붙이고, `nestedToolCalls` capability를 광고한 클라이언트만 중첩 렌더링한다. 표준 클라이언트에서는 평평하게 보인다.
 - 진행 상황은 부모 `tool_call_update.content`에 **최근 한 줄만** 넣는다(`content`는 매번 전체 교체라 누적하면 전송량이 제곱으로 는다). 전체 로그는 자식 세션 event log에 있다.
 - 예산은 부모 Turn 예산에서 차감. 부모 권한 규칙을 상속하고 `explore`/`reviewer`는 쓰기 도구를 제거한다.

@@ -1,6 +1,7 @@
 """역할별 모델 오버라이드 설정 (architecture.md §6.10).
 
-서브에이전트 프리셋(explore/executor/reviewer/compactor/titler)에만 적용된다.
+서브에이전트 프리셋(explore/executor/reviewer/debugger/security-reviewer/compactor/titler)에만
+적용된다.
 메인 세션 모델은 `--model`/`--effort`와 `/model`이 정하며 여기서 다루지 않는다.
 파일 형식은 모델 별칭 표(`models`)와 역할→모델 매핑(`agents`)이다.
 

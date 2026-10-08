@@ -1,15 +1,16 @@
 import { Box, Text } from "ink";
 import type { DiffContent, ToolContent } from "../../agent/types.js";
 import type { ToolItem, ToolStatus } from "../state.js";
+import { theme } from "../theme.js";
 
 export const MAX_DIFF_LINES = 40;
 export const MAX_TEXT_LINES = 12;
 
 const STATUS_ICON: Record<ToolStatus, { icon: string; color: string }> = {
-  pending: { icon: "○", color: "gray" },
-  in_progress: { icon: "◐", color: "yellow" },
-  completed: { icon: "✓", color: "green" },
-  failed: { icon: "✗", color: "red" },
+  pending: { icon: "○", color: theme.status.pending },
+  in_progress: { icon: "◐", color: theme.status.in_progress },
+  completed: { icon: "✓", color: theme.status.completed },
+  failed: { icon: "✗", color: theme.status.failed },
 };
 
 const KIND_ICON: Record<string, string> = {
@@ -65,7 +66,12 @@ function DiffView({ diff }: { diff: DiffContent }) {
     <Box flexDirection="column">
       <Text dimColor>{diff.path}</Text>
       {shown.map((line, i) => (
-        <Text key={i} color={line.sign === "+" ? "green" : line.sign === "-" ? "red" : undefined} dimColor={line.sign === " "}>
+        <Text
+          key={i}
+          color={line.sign === "+" ? theme.diffAddedFg : line.sign === "-" ? theme.diffRemovedFg : undefined}
+          backgroundColor={line.sign === "+" ? theme.diffAddedBg : line.sign === "-" ? theme.diffRemovedBg : undefined}
+          dimColor={line.sign === " "}
+        >
           {line.sign} {line.text}
         </Text>
       ))}
@@ -118,19 +124,20 @@ export interface ToolCardProps {
 export function ToolCard({ item, expanded }: ToolCardProps) {
   const status = STATUS_ICON[item.status];
   const kindIcon = KIND_ICON[item.toolKind] ?? KIND_ICON.other;
+  const kindColor = theme.toolKind[item.toolKind as keyof typeof theme.toolKind] ?? theme.toolKind.other;
   const summary = summarize(item.content);
   return (
     <Box flexDirection="column" marginLeft={item.depth * 2}>
       <Box>
         <Text color={status.color}>{status.icon} </Text>
-        <Text color="cyan">
+        <Text color={kindColor}>
           {kindIcon} {item.toolKind}
         </Text>
         <Text> {item.title}</Text>
         {!expanded && summary !== "" && <Text dimColor> ({summary})</Text>}
       </Box>
       {expanded && item.content.length > 0 && (
-        <Box flexDirection="column" marginLeft={2} borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor="gray" paddingLeft={1}>
+        <Box flexDirection="column" marginLeft={2} borderStyle="single" borderLeft borderTop={false} borderRight={false} borderBottom={false} borderColor={theme.border} paddingLeft={1}>
           {item.content.map((c, i) =>
             c.type === "diff" ? <DiffView key={i} diff={c} /> : <TextView key={i} text={c.text} />,
           )}

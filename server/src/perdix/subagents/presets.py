@@ -13,7 +13,9 @@ from pydantic import BaseModel
 from perdix.config.agents import AgentsConfig
 from perdix.harness.modes import Mode
 
-PresetId = Literal["explore", "executor", "reviewer", "compactor", "titler"]
+PresetId = Literal[
+    "explore", "executor", "reviewer", "compactor", "titler", "debugger", "security-reviewer"
+]
 
 
 class SubagentPreset(BaseModel):
@@ -24,51 +26,71 @@ class SubagentPreset(BaseModel):
     description: str
 
 
-def _mode(preset_id: str, *, read_only: bool) -> Mode:
-    return Mode(
+def _preset(
+    preset_id: PresetId, *, model: str, effort: str | None, read_only: bool, description: str
+) -> SubagentPreset:
+    # description은 한 번만 정의해 프리셋 메타데이터와 Mode(시스템 프롬프트에 실림) 양쪽에 쓴다.
+    mode = Mode(
         id=preset_id,
         name=preset_id,
-        description=f"subagent preset: {preset_id}",
+        description=description,
         read_only=read_only,
         verification=False,
+    )
+    return SubagentPreset(
+        id=preset_id, model=model, effort=effort, mode=mode, description=description
     )
 
 
 PRESETS: Final[dict[PresetId, SubagentPreset]] = {
-    "explore": SubagentPreset(
-        id="explore",
+    "explore": _preset(
+        "explore",
         model="claude-haiku-4-5",
         effort=None,
-        mode=_mode("explore", read_only=True),
+        read_only=True,
         description="읽기 전용 탐색/요약. 양이 많고 판단은 얕다.",
     ),
-    "executor": SubagentPreset(
-        id="executor",
+    "executor": _preset(
+        "executor",
         model="claude-opus-5-5",
         effort="high",
-        mode=_mode("executor", read_only=False),
+        read_only=False,
         description="부모가 쪼개준 과업 실행. 쓰기 가능, main보다 한 단계 낮은 effort.",
     ),
-    "reviewer": SubagentPreset(
-        id="reviewer",
+    "reviewer": _preset(
+        "reviewer",
         model="claude-sonnet-5-5",
         effort="medium",
-        mode=_mode("reviewer", read_only=True),
+        read_only=True,
         description="완료 조건 판정. 읽기 전용, 검증 게이트용.",
     ),
-    "compactor": SubagentPreset(
-        id="compactor",
+    "compactor": _preset(
+        "compactor",
         model="claude-haiku-4-5",
         effort=None,
-        mode=_mode("compactor", read_only=True),
+        read_only=True,
         description="히스토리 요약 전용, 빈번 호출.",
     ),
-    "titler": SubagentPreset(
-        id="titler",
+    "titler": _preset(
+        "titler",
         model="claude-haiku-4-5",
         effort=None,
-        mode=_mode("titler", read_only=True),
+        read_only=True,
         description="세션 제목 등 단발 저비용 잡무.",
+    ),
+    "debugger": _preset(
+        "debugger",
+        model="claude-sonnet-5-5",
+        effort="medium",
+        read_only=False,
+        description="실패 원인 분석. 재현에 필요하면 쓰기·실행 도구도 쓸 수 있다.",
+    ),
+    "security-reviewer": _preset(
+        "security-reviewer",
+        model="claude-sonnet-5-5",
+        effort="medium",
+        read_only=True,
+        description="취약점·신뢰 경계 점검. 읽기 전용, 코드 리뷰 관점의 보안 검토.",
     ),
 }
 

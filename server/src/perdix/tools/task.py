@@ -1,8 +1,8 @@
 """task 도구: 역할 프리셋으로 서브에이전트를 스폰한다 (harness-loop.md §8, architecture.md §6.8).
 
 kind는 "other"라 읽기 전용 레지스트리에서 빠진다. 그래서 explore/reviewer 같은 읽기 전용
-서브에이전트는 다시 서브에이전트를 띄울 수 없다. explore/reviewer 호출만 읽기 전용으로 판정해
-병렬 실행되고, executor는 장벽으로 직렬 실행된다.
+서브에이전트는 다시 서브에이전트를 띄울 수 없다. explore/reviewer/security-reviewer 호출만 읽기
+전용으로 판정해 병렬 실행되고, executor/debugger는 장벽으로 직렬 실행된다.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from typing import Any
 from perdix.tools.base import ToolContext, ToolKind, ToolOutput, tool_error
 
 # 모델이 고를 수 있는 프리셋. compactor/titler는 내부 전용이라 노출하지 않는다.
-TASK_PRESETS = ("explore", "executor", "reviewer")
-READ_ONLY_PRESETS = frozenset({"explore", "reviewer"})
+TASK_PRESETS = ("explore", "executor", "reviewer", "debugger", "security-reviewer")
+READ_ONLY_PRESETS = frozenset({"explore", "reviewer", "security-reviewer"})
 
 
 class TaskTool:
@@ -21,8 +21,11 @@ class TaskTool:
     description = (
         "Delegate a self-contained task to a subagent with its own isolated context. "
         "Presets: 'explore' (fast read-only codebase search), 'reviewer' (read-only review), "
-        "'executor' (can edit files and run commands). The subagent does not see this "
-        "conversation, so the prompt must contain everything it needs. "
+        "'security-reviewer' (read-only security review), "
+        "'executor' (can edit files and run commands), "
+        "'debugger' (root-cause analysis; can run commands to reproduce failures). "
+        "The subagent does not see this conversation, "
+        "so the prompt must contain everything it needs. "
         "Optional 'model' overrides the preset's default model. "
         "Returns the subagent's final answer."
     )
