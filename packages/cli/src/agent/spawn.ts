@@ -151,6 +151,8 @@ export function spawnServer(command: ServerCommand, opts: SpawnOptions = {}): Se
     cwd: opts.cwd,
     env: opts.env ?? process.env,
     stdio: ["pipe", "pipe", stderrTarget],
+    // VS Code 같은 GUI 호스트에서도 ACP 서버의 콘솔 창을 띄우지 않는다.
+    windowsHide: true,
   });
   if (typeof stderrTarget === "number") closeSync(stderrTarget);
 
