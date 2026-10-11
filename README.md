@@ -1,5 +1,7 @@
 # Perdix Agent
 
+![Perdix CLI — 터미널 대화 화면](docs/images/perdix-cli.png)
+
 터미널(TUI)과 VS Code에서 동작하는 코딩 에이전트.
 Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https://agentclientprotocol.com)로 구동한다.
 
