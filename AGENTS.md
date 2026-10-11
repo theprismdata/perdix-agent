@@ -10,7 +10,7 @@ Python 에이전트 코어(`server/`)를 TypeScript 클라이언트(`packages/cl
 - `server/` — Python 3.12+, `uv` 관리. 패키지명 `perdix`, 진입점 `perdix-server`. 하네스 루프·LLM·도구·권한·세션 전부 여기.
 - `packages/protocol/` — `@perdix/protocol`. ACP 타입 재수출 + `_perdix/*` 확장 + IDE bridge 타입.
 - `packages/cli/` — `perdix` 바이너리. Ink TUI, 서버 스폰, ACP 클라이언트, IDE bridge 클라이언트.
-- `packages/vscode/` — VS Code 확장. 터미널 런처 + IDE bridge 서버. Webview 없음(ADR 0003).
+- `packages/vscode/` — VS Code Webview 채팅 확장. 확장 호스트가 ACP로 Python 서버를 연결하고 Webview는 입력·표시를 담당한다(ADR 0008).
 - `docs/` — 설계 문서. 구조를 바꾸는 결정은 `docs/adr/NNNN-*.md`로 남긴다.
 
 ## 경계 규칙 (반드시 지킬 것)

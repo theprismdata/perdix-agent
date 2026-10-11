@@ -1,0 +1,64 @@
+import assert from "node:assert/strict";
+import { readFile, mkdir } from "node:fs/promises";
+import { createServer } from "node:http";
+import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
+import vm from "node:vm";
+import ts from "typescript";
+import { chromium } from "playwright";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const compiled = ts.transpileModule(await readFile(resolve(root, "src/webview.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+const exported = {};
+vm.runInNewContext(compiled, { exports: exported });
+const theme = ":root{--vscode-sideBar-background:#181a20;--vscode-foreground:#e1e3ec;--vscode-descriptionForeground:#9ca1b2;--vscode-font-family:Arial,sans-serif;--vscode-font-size:13px;--vscode-panel-border:#353945;--vscode-input-background:#242832;--vscode-button-background:#646de2;--vscode-button-foreground:white;--vscode-button-secondaryBackground:#2c303c;--vscode-textLink-foreground:#b2b8ff;--vscode-dropdown-background:#242832;--vscode-focusBorder:#8790ff;--vscode-errorForeground:#ff9393;}";
+let origin;
+const server = createServer(async (req, res) => {
+  if (req.url === "/") { res.setHeader("Content-Type", "text/html; charset=utf-8"); res.end(exported.chatHtml(origin, origin + "/chat.js", origin + "/chat.css", "test-nonce")); }
+  else if (req.url === "/chat.js") { res.setHeader("Content-Type", "application/javascript"); res.end(await readFile(resolve(root, "media/chat.js"))); }
+  else if (req.url === "/chat.css") { res.setHeader("Content-Type", "text/css"); res.end(theme + await readFile(resolve(root, "media/chat.css"), "utf8")); }
+  else { res.writeHead(404); res.end(); }
+});
+await new Promise((r) => server.listen(0, "127.0.0.1", r));
+origin = `http://127.0.0.1:${server.address().port}`;
+let browser;
+try {
+  browser = await chromium.launch(process.platform === "win32" ? { channel: "msedge", headless: true } : { headless: true });
+  const page = await browser.newPage({ viewport: { width: 380, height: 800 } });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(() => { window.sent = []; window.acquireVsCodeApi = () => ({ postMessage: (m) => window.sent.push(m), getState: () => ({ draft: "" }), setState: () => {} }); });
+  await page.goto(origin);
+  await page.waitForFunction(() => window.sent.some((m) => m.type === "ready"));
+  const out = resolve(root, "../../dist"); await mkdir(out, { recursive: true });
+  await page.screenshot({ path: resolve(out, "vscode-chat-welcome.png") });
+  await page.locator("#prompt").fill("프로젝트를 설명해줘");
+  await page.locator("#prompt").press("Enter");
+  assert.deepEqual(await page.evaluate(() => window.sent.at(-1)), { type: "send", text: "프로젝트를 설명해줘" });
+  const info = { cwd: "C:/Projects/Perdix", modes: [{ id: "chat", name: "채팅" }, { id: "build", name: "구현" }], currentMode: "chat", models: [{ value: "fake", name: "테스트 모델" }], currentModel: "fake" };
+  const post = (data) => page.evaluate((message) => window.dispatchEvent(new MessageEvent("message", { data: message })), data);
+  const entries = [{ type: "user_prompt", text: "프로젝트를 설명해줘" }, { type: "agent_text", text: "Python 서버와 TypeScript 클라이언트로 구성된 프로젝트입니다.\n" }];
+  await post({ type: "snapshot", entries, permissions: [], busy: true, info });
+  await post({ type: "event", event: { type: "agent_text", text: "<img src=x onerror=alert(1)>" } });
+  assert.equal(await page.locator("#messages img").count(), 0);
+  assert.ok((await page.locator("#messages").innerText()).includes("<img src=x onerror=alert(1)>"));
+  assert.equal(await page.locator("#send").isDisabled(), true);
+  const request = { requestId: "r", title: "README.md 변경", rawInput: { path: "README.md" }, options: [{ optionId: "allow", name: "이번만 허용" }, { optionId: "deny", name: "거절" }] };
+  await post({ type: "permission", request });
+  await page.getByRole("button", { name: "이번만 허용" }).click();
+  assert.deepEqual(await page.evaluate(() => window.sent.at(-1)), { type: "permission", requestId: "r", optionId: "allow" });
+  await post({ type: "permission_done", requestId: "r" });
+  assert.equal(await page.locator(".permission").count(), 0);
+  await page.locator("#cancel").click();
+  assert.deepEqual(await page.evaluate(() => window.sent.at(-1)), { type: "cancel" });
+  await post({ type: "state", busy: false, info });
+  await page.locator("#mode").selectOption("build");
+  assert.deepEqual(await page.evaluate(() => window.sent.at(-1)), { type: "mode", value: "build" });
+  await post({ type: "snapshot", entries, permissions: [request], busy: true, info });
+  await post({ type: "event", event: { type: "tool_call", toolCallId: "t", title: "README.md 읽기", status: "completed" } });
+  await page.screenshot({ path: resolve(out, "vscode-chat-conversation.png") });
+  await page.setViewportSize({ width: 260, height: 640 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+  assert.deepEqual(errors, []);
+  console.log("PASS: Webview loading, send, streaming, HTML isolation, permission, cancel, model controls, restoration, narrow layout");
+} finally { await browser?.close(); await new Promise((r) => server.close(r)); }

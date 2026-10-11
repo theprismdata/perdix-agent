@@ -13,6 +13,10 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 
 ## 사용법
 
+### VS Code 채팅 화면
+
+`perdix-vscode-0.0.1.vsix`를 **Install from VSIX...**로 설치한 뒤, 사이드바의 Perdix 아이콘을 누른다. 터미널이 아닌 Webview에서 대화·모델 선택·작업 승인·이전 대화 불러오기를 제공한다. Windows 설치 프로그램의 서버와 키 설정을 자동으로 사용한다. 기존 확장을 업데이트했으면 VS Code 창을 다시 로드한다. 자세한 사용법은 [확장 안내](packages/vscode/README.md)를 참고한다.
+
 ### Windows 설치 프로그램 (권장)
 
 자세한 준비 사항, 빌드 옵션, 키 설정 및 검증 결과는 [Windows 빌드 안내](docs/windows-build.md)를 참고한다.

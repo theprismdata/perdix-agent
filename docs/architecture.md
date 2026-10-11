@@ -15,7 +15,7 @@
 | 코어 언어 | Python 3.12+ | 하네스 루프, LLM 호출, 도구 실행, 세션/권한 전부 Python |
 | 클라이언트 언어 | TypeScript | CLI/TUI, VS Code 확장, 공유 프로토콜 타입 |
 | 클라이언트↔코어 프로토콜 | **ACP (JSON-RPC 2.0, stdio)** | 표준 채택으로 Zed, Neovim 등 다른 에디터에도 그대로 연결. Python/TS SDK 존재 |
-| VS Code UI | **통합 터미널에서 TUI 재사용** | 확장은 터미널 런처 + 에디터 연동(diff, 파일 열기, 선택 영역, 진단)만 담당. Webview는 2차 |
+| VS Code UI | **사이드바 Webview 채팅** | 확장 호스트가 ACP 클라이언트로 Python 서버를 구동한다. 기존 터미널 전용 결정은 ADR 0008로 대체 |
 | 하네스 루프 | 검증 포함 자율 루프 | tool-call 루프 + 계획→실행→검증→재시도 외부 루프 + 컨텍스트 압축 + 중단/재개 |
 | LLM 공급자 | Anthropic, OpenAI(+호환), Gemini, 로컬(Ollama 등) | 공급자 추상화 뒤에 네이티브 어댑터 |
 | 개발 도구 호환 | AGENTS.md(정본) + CLAUDE.md(임포트) | Codex와 Claude Code 모두 이 저장소를 읽고 작업 가능 |
@@ -336,6 +336,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 - 헤드리스 모드: `perdix -p "..." --json` 으로 TUI 없이 이벤트 스트림 출력(CI, 스크립트용). 이때 서버는 `--permission-mode deny`(기본) 또는 `allowlist`로 기동한다.
 
 ### 7.2 VS Code 확장 (packages/vscode)
+- **현재 구현 (ADR 0008):** Perdix 사이드바 Webview와 `Perdix: Open Chat` 명령을 제공한다. 확장 호스트가 기존 ACP 연결·세션 어댑터를 재사용해 서버를 직접 구동하며 채팅, 권한 응답, 모델·모드 선택, 세션 불러오기를 처리한다. Windows 동봉 서버를 자동 탐색하고 신뢰한 작업 폴더에서만 실행한다. 아래 터미널·브리지 항목은 이전 설계이며 아직 구현하지 않은 에디터 연동 계획이다.
 - 명령 `Perdix: Open`이 통합 터미널에 `perdix`를 띄움. 터미널을 여러 개 열면 세션도 여러 개이며, 세션 DB와 체크포인트는 6.7의 규칙으로 동시 쓰기를 처리한다. 환경변수 `PERDIX_IDE_PORT`, 락파일 `~/.perdix/ide/<port>.lock`(토큰 포함)로 CLI가 브리지를 발견.
 - 브리지(WS, localhost, JSON-RPC): `ide/openDiff`, `ide/openFile`, `ide/getDirtyFiles`, `ide/revertFile`, `ide/getSelection`, `ide/getDiagnostics`, `ide/getOpenEditors`. Origin 검사, 락파일 0600, `extensionKind: ["workspace"]`. Ctrl+P 등 VS Code가 가로채는 키는 `sendSequence` 키바인딩으로 보완.
 - CLI는 ACP 클라이언트로서 `fs/read_text_file`은 디스크에서 읽고 dirty면 경고를 덧붙이며, `fs/write_text_file`은 디스크에 직접 쓰고 dirty 충돌 시 사용자에게 묻는다(에디터 저장 경로는 formatOnSave 때문에 쓰지 않는다). 진단은 `_perdix/diagnostics` 알림으로 서버에 전달. 즉 **서버는 VS Code의 존재를 모른다**.

@@ -1,29 +1,83 @@
 {
   "name": "perdix-vscode",
   "displayName": "Perdix",
-  "version": "0.0.0",
+  "version": "0.0.1",
+  "description": "Perdix AI coding agent chat in the VS Code sidebar",
   "private": true,
+  "type": "module",
   "publisher": "perdix",
   "main": "./dist/extension.cjs",
-  "engines": { "vscode": "^1.95.0" },
-  "extensionKind": ["workspace"],
-  "activationEvents": [],
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onView:perdix.chat"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "신뢰한 폴더에서만 에이전트를 실행합니다."
+    }
+  },
   "contributes": {
-    "commands": [{ "command": "perdix.open", "title": "Perdix: Open" }]
+    "commands": [
+      {
+        "command": "perdix.open",
+        "title": "Perdix: Open Chat"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "perdix",
+          "title": "Perdix",
+          "icon": "media/perdix.svg"
+        }
+      ]
+    },
+    "views": {
+      "perdix": [
+        {
+          "type": "webview",
+          "id": "perdix.chat",
+          "name": "Perdix"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Perdix",
+      "properties": {
+        "perdix.serverPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "perdix-server 실행 파일의 전체 경로. Windows 기본 설치 경로는 자동 탐색합니다."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
+    "test:webview": "node scripts/test-webview.mjs",
+    "test:server": "tsx scripts/test-server.mts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@perdix/protocol": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.95.0",
     "eslint": "^9.0.0",
+    "playwright": "^1.64.0",
     "tsup": "^8.5.1",
+    "tsx": "^4.23.15",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.0.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "zod": "^4.6.5"
   }
 }
