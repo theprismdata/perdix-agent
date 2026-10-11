@@ -31,6 +31,8 @@ export class ChatController {
   private busy = false;
   private disposed = false;
   private cancelled = false;
+  private connecting = false;
+  private connectionError: string | null = null;
 
   constructor(private readonly deps: ChatDependencies) {}
 
@@ -38,6 +40,7 @@ export class ChatController {
 
   snapshot(): void {
     this.deps.post({ type: "snapshot", entries: this.entries, busy: this.busy,
+      connecting: this.connecting, connectionError: this.connectionError,
       info: this.session?.info ?? this.deps.initialInfo ?? null, connected: this.session !== null,
       permissions: [...this.pending.values()].map((p) => p.request) });
   }
@@ -52,6 +55,25 @@ export class ChatController {
     this.append({ type: "error", message: error instanceof Error ? error.message : String(error) });
   }
 
+  async initialize(): Promise<void> {
+    if (this.disposed) return;
+    this.snapshot();
+    if (this.busy || this.session) return;
+    this.busy = true;
+    this.connecting = true;
+    this.connectionError = null;
+    this.state();
+    try { await this.connect(); }
+    catch (error) {
+      this.connectionError = error instanceof Error ? error.message : String(error);
+      this.error(error);
+    } finally {
+      this.busy = false;
+      this.connecting = false;
+      this.state();
+    }
+  }
+
   private async connect(sessionId?: string): Promise<SessionHandle> {
     if (this.session) return this.session;
     const session = await this.deps.connect(sessionId);
@@ -62,6 +84,7 @@ export class ChatController {
       if (event.type === "server_exit") {
         this.cancelPermissions();
         this.session = null;
+        this.connectionError = "서버 연결이 종료되었습니다.";
       }
       if (["mode_changed", "model_changed", "server_exit"].includes(event.type)) this.state();
     });
@@ -75,6 +98,7 @@ export class ChatController {
 
   private state(): void {
     this.deps.post({ type: "state", busy: this.busy,
+      connecting: this.connecting, connectionError: this.connectionError,
       info: this.session?.info ?? this.deps.initialInfo ?? null, connected: this.session !== null });
   }
 
@@ -119,6 +143,8 @@ export class ChatController {
     if (this.busy || this.disposed) return;
     this.busy = true;
     this.cancelled = false;
+    this.connecting = true;
+    this.connectionError = null;
     this.state();
     try {
       this.cancelPermissions();
@@ -127,9 +153,12 @@ export class ChatController {
       await previous?.close();
       this.entries = [];
       this.snapshot();
-      if (sessionId) await this.connect(sessionId);
-    } catch (error) { this.error(error); }
-    finally { this.busy = false; this.state(); }
+      await this.connect(sessionId);
+    } catch (error) {
+      this.connectionError = error instanceof Error ? error.message : String(error);
+      this.error(error);
+    }
+    finally { this.busy = false; this.connecting = false; this.state(); }
   }
 
   async configure(kind: "mode" | "model", value: string): Promise<void> {

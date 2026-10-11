@@ -9,6 +9,7 @@
   let chunk = null;
   let chunkKind = null;
   let busy = false;
+  let connected = false;
   const draft = vscode.getState();
   byId('prompt').value = draft?.draft || '';
   byId('prompt').addEventListener('input', () => vscode.setState({ draft: byId('prompt').value }));
@@ -59,9 +60,11 @@
   }
   function state(message) {
     busy = message.busy;
-    byId('send').disabled = busy; byId('cancel').hidden = !busy;
+    connected = !!message.connected;
+    byId('send').disabled = busy || !message.connected; byId('cancel').hidden = !busy || message.connecting;
+    byId('reconnect').hidden = busy || !!message.connected;
     byId('new').disabled = busy; byId('history').disabled = busy;
-    byId('status').textContent = busy ? '작업 중…' : message.info ? '준비됨 · ' + message.info.cwd : '메시지를 보내면 연결합니다';
+    byId('status').textContent = message.connecting ? '서버 연결 중…' : busy ? '작업 중…' : message.connected ? '준비됨 · ' + message.info.cwd : message.connectionError ? '연결 실패 · ' + message.connectionError : '서버 연결 대기';
     if (message.info) {
       options('mode', message.info.modes, message.info.currentMode, message.connected);
       options('model', message.info.models, message.info.currentModel, message.connected);
@@ -91,11 +94,12 @@
     else if (data.type === 'permission_done') { approvals.get(data.requestId)?.remove(); approvals.delete(data.requestId); }
   });
   byId('composer').addEventListener('submit', (e) => {
-    e.preventDefault(); const text = byId('prompt').value.trim(); if (!text || busy) return;
+    e.preventDefault(); const text = byId('prompt').value.trim(); if (!text || busy || !connected) return;
     send('send', { text }); byId('prompt').value = ''; vscode.setState({ draft: '' });
   });
   byId('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); byId('composer').requestSubmit(); } });
   for (const id of ['cancel', 'new', 'history', 'keys', 'folder', 'settings']) byId(id).addEventListener('click', () => send(id));
+  byId('reconnect').addEventListener('click', () => send('ready'));
   for (const id of ['mode', 'model']) byId(id).addEventListener('change', () => send(id, { value: byId(id).value }));
   for (const button of document.querySelectorAll('[data-prompt]')) button.addEventListener('click', () => { byId('prompt').value = button.dataset.prompt; byId('prompt').focus(); });
   send('ready');

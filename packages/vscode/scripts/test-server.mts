@@ -25,6 +25,10 @@ const controller = new ChatController({
   },
 });
 try {
+  await controller.initialize();
+  assert.ok(sessionId, "Startup did not create a session");
+  assert.ok(events.some((e) => JSON.stringify(e).includes('"connected":true')), "Startup not connected");
+  assert.equal(events.some((e) => JSON.stringify(e).includes("Webview server reply")), false, "Startup unexpectedly sent a prompt");
   await controller.send("hello");
   assert.ok(events.some((e) => JSON.stringify(e).includes("Webview server reply")), "No streamed server response");
   assert.ok(sessionId, "No session created");

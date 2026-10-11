@@ -66,7 +66,7 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
     if (!parsed.success) return;
     const message = parsed.data;
     switch (message.type) {
-      case "ready": this.controller.snapshot(); break;
+      case "ready": await this.controller.initialize(); break;
       case "send": await this.controller.send(message.text); break;
       case "cancel": await this.controller.cancel(); break;
       case "new": await this.controller.reset(); break;

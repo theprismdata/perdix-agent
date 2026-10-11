@@ -23,6 +23,46 @@ function fixture() {
 const permissionRequest: PermissionRequest = { requestId: "r", toolCallId: "t", title: "파일 쓰기", options: [{ optionId: "allow", name: "허용", kind: "allow_once" }] };
 
 describe("Webview chat", () => {
+  it("connects on opening without prompting and allows configuration before the first prompt", async () => {
+    const f = fixture();
+    await Promise.all([f.controller.initialize(), f.controller.initialize()]);
+    expect(f.connect).toHaveBeenCalledOnce();
+    expect(f.session.prompt).not.toHaveBeenCalled();
+    expect(f.post).toHaveBeenCalledWith(expect.objectContaining({
+      type: "state", connected: true, connecting: false, busy: false, info: f.session.info,
+    }));
+    await f.controller.configure("model", "fake");
+    expect(f.session.setModel).toHaveBeenCalledWith("fake");
+    await f.controller.configure("mode", "chat");
+    expect(f.session.setMode).toHaveBeenCalledWith("chat");
+    await f.controller.initialize();
+    expect(f.connect).toHaveBeenCalledOnce();
+    await f.controller.dispose();
+  });
+
+  it("reports startup failures and retries without sending a message", async () => {
+    const f = fixture();
+    f.connect.mockRejectedValueOnce(new Error("server missing"));
+    await f.controller.initialize();
+    expect(f.post).toHaveBeenCalledWith(expect.objectContaining({
+      type: "state", connected: false, busy: false, connectionError: "server missing",
+    }));
+    await f.controller.initialize();
+    expect(f.connect).toHaveBeenCalledTimes(2);
+    expect(f.session.prompt).not.toHaveBeenCalled();
+    expect(f.post).toHaveBeenCalledWith(expect.objectContaining({ connected: true, connectionError: null }));
+    await f.controller.dispose();
+  });
+
+  it("reconnects immediately for a new conversation", async () => {
+    const f = fixture();
+    await f.controller.initialize();
+    await f.controller.reset();
+    expect(f.connect).toHaveBeenCalledTimes(2);
+    expect(f.session.prompt).not.toHaveBeenCalled();
+    await f.controller.dispose();
+  });
+
   it("shows the configured agent and model before starting the server", () => {
     const post = vi.fn();
     const initialInfo = { sessionId: "", cwd: "/work", currentMode: "chat", currentModel: "gpt-default",
