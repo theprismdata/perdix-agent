@@ -1,5 +1,7 @@
 node_modules/
 dist/
+packages/cli/server/
+*.tgz
 .venv/
 __pycache__/
 .pytest_cache/

@@ -1,6 +1,6 @@
 /**
  * Python 에이전트 서버(perdix-server) 발견과 프로세스 기동.
- * 발견 순서: --server 인자 → PERDIX_SERVER → PATH의 perdix-server → 저장소 개발 모드(uv run).
+ * 발견 순서: 명시적 지정 → 동봉 바이너리 → PATH → 동봉 소스 → 저장소 개발 모드.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, openSync, closeSync } from "node:fs";
@@ -13,7 +13,7 @@ export interface ServerCommand {
   command: string;
   args: string[];
   /** 어떤 경로로 찾았는지(진단 메시지용) */
-  source: "flag" | "env" | "path" | "dev";
+  source: "flag" | "env" | "path" | "bundled" | "dev";
 }
 
 export interface ResolveOptions {
@@ -23,6 +23,8 @@ export interface ResolveOptions {
   cwd?: string;
   /** 저장소 루트 탐색 시작점. 기본은 이 모듈의 위치 */
   moduleDir?: string;
+  /** 독립 실행 바이너리 위치. */
+  executableDir?: string;
 }
 
 /** 공백 구분 명령 문자열을 실행 파일과 인자로 나눈다. */
@@ -75,10 +77,22 @@ export function resolveServerCommand(opts: ResolveOptions = {}): ServerCommand {
   if (fromEnv && fromEnv.trim()) {
     return { ...splitCommand(fromEnv), source: "env" };
   }
+  const nativeServer = join(opts.executableDir ?? dirname(process.execPath), "server", "perdix-server.exe");
+  if (existsSync(nativeServer)) return { command: nativeServer, args: [], source: "bundled" };
   const onPath = findOnPath("perdix-server", env);
   if (onPath) return { command: onPath, args: [], source: "path" };
 
   const moduleDir = opts.moduleDir ?? dirname(fileURLToPath(import.meta.url));
+  const bundledServer = resolve(moduleDir, "..", "server");
+  if (existsSync(join(bundledServer, "pyproject.toml"))) {
+    const uv = findOnPath("uv", env);
+    if (!uv) throw new Error("Bundled perdix server requires uv. Install uv and add it to PATH.");
+    return {
+      command: uv,
+      args: ["run", "--locked", "--no-dev", "--project", bundledServer, "perdix-server"],
+      source: "bundled",
+    };
+  }
   const repo = findRepoRoot(moduleDir) ?? findRepoRoot(opts.cwd ?? process.cwd());
   if (repo) {
     return {

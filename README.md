@@ -13,7 +13,38 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 
 ## 사용법
 
+### Windows 설치 프로그램 (권장)
+
+자세한 준비 사항, 빌드 옵션, 키 설정 및 검증 결과는 [Windows 빌드 안내](docs/windows-build.md)를 참고한다.
+
+`dist/Perdix-Setup-windows-x64.exe`를 실행하고 공급자와 API 키를 입력하면 설치가 끝난다.
+프로그램, 키 파일, 기본 모델, 바탕화면·시작 메뉴 바로가기를 자동으로 설정한다.
+키 입력을 비우면 해당 공급자의 기존 저장 키를 사용한다. 첫 설치에는 키가 필요하다.
+설정은 사용자 홈의 `.perdix/credentials.json`과 `.perdix/preferences.json`에 저장한다.
+제거 시 키와 세션 기록은 남긴다. 런타임 설치나 JSON 직접 편집은 필요 없다.
+
+Windows x64 개발 환경에서 Node.js 22 이상, pnpm 10.30.3, Bun, uv, Inno Setup 6을 준비한다.
+루트의 `build-windows.cmd`를 더블클릭하거나 다음 명령 하나로 빌드한다.
+
+```powershell
+pnpm build:windows
+```
+
+의존성 설치, CLI·서버 빌드, 설치 파일 생성, 실행 확인을 자동으로 수행한다.
+빌드 결과는 `dist/Perdix-Setup-windows-x64.exe`다. 성공하면 중간 빌드 폴더는 휴지통으로 이동한다. 휴지통 기능을 지원하지 않는 환경에서는 경고와 함께 폴더를 남긴다. 빌드 실패 시에도 진단을 위해 남긴다.
+
+- `pnpm build:windows -CheckOnly`: 필요한 빌드 도구만 확인한다.
+- `pnpm build:windows -TestInstaller`: 별도 폴더에서 설치·키 설정·바로가기·재설치·제거까지 검증한다. 실제 사용자 설정은 건드리지 않는다.
+- `pnpm build:windows -KeepBuildFiles`: 중간 빌드 폴더를 보관한다.
+- `pnpm build:windows -InnoCompiler "C:\경로\ISCC.exe"`: Inno Setup 컴파일러 위치를 지정한다.
+
+현재 서버의 Unix 셸 명령·프로세스 그룹 취소 처리에는 Windows 호환성 제한이 있다.
+
 ### 1. API 키 준비
+
+처음 CLI를 실행하면 `~/.perdix/credentials.json`을 자동 생성하고 경로를 안내한다.
+`anthropic`과 `openai`의 `api_key` 기본값은 빈 문자열이다. 사용할 공급자의 키를 넣으면 된다.
+기존 파일은 수정하거나 덮어쓰지 않는다. `--help`, `--version`은 파일을 생성하지 않는다.
 
 둘 중 하나에 Anthropic API 키를 넣는다.
 
@@ -74,8 +105,10 @@ perdix -p "이 프로젝트 구조를 설명해줘"
 
 1. `--server <명령>` 옵션
 2. 환경변수 `PERDIX_SERVER`
-3. PATH에 있는 `perdix-server`
-4. 저장소 안에서 개발 중이면 `uv run perdix-server`
+3. 실행 파일 옆의 `server/perdix-server.exe`
+4. PATH에 있는 `perdix-server`
+5. CLI 옆에 Python 서버 소스가 있으면 uv로 실행하는 호환 경로
+6. 저장소 안에서 개발 중이면 `uv run perdix-server`
 
 찾지 못하면 "perdix-server not found" 메시지가 나온다. 이때는 `uv tool install perdix`로 설치하거나 `PERDIX_SERVER`를 설정한다.
 
@@ -160,6 +193,18 @@ scripts/bootstrap.sh          # pnpm install + (cd server && uv sync)
 ```
 
 ### 개발 중 실행
+
+Windows PowerShell에서는 저장소 루트에서 의존성을 설치하고 빌드한다(Node.js 22 이상, pnpm, uv 필요).
+
+```powershell
+pnpm install --frozen-lockfile
+uv sync --locked --project server
+pnpm -r build
+node packages/cli/dist/main.js --help
+node packages/cli/dist/main.js
+```
+
+API 키를 환경변수로 지정할 때는 `$env:ANTHROPIC_API_KEY = '키'` 형식을 사용한다.
 
 ```bash
 (cd packages/cli && pnpm build) && node packages/cli/dist/main.js   # 빌드한 CLI 실행

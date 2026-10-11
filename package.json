@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "pnpm --filter perdix dev",
     "build": "pnpm -r build",
+    "build:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck"

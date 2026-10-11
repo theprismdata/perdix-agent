@@ -4,7 +4,9 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { runAuthCommand } from "./agent/auth.js";
 import { startServerConnection, type PerdixConnection } from "./agent/connection.js";
+import { DEFAULT_CREDENTIALS_PATH, ensureCredentialsFile } from "./agent/credentials.js";
 import { formatEventText, runHeadless } from "./agent/headless.js";
+import { readDefaultModel } from "./agent/preferences.js";
 import type { AgentSession } from "./agent/session.js";
 import type { SessionHandle, SessionListItem } from "./agent/types.js";
 import { checkNodeVersion, VERSION } from "./version.js";
@@ -56,12 +58,11 @@ function parseCli(argv: string[]) {
   }).values;
 }
 
-/** ui/ 모듈은 지연 로드한다. 빌드에 없으면 null */
+/** ui/ 모듈은 지연 로드한다. 독립 바이너리에도 포함된다. */
 async function loadUi(): Promise<RenderAppModule | null> {
-  // 지정자를 변수로 두어 번들러가 정적으로 따라가지 않게 한다(tsup가 ui/index를 별도 엔트리로 낸다).
-  const specifier = new URL("./ui/index.js", import.meta.url).href;
   try {
-    const mod = (await import(specifier)) as Partial<RenderAppModule>;
+    // 정적 지정자로 바이너리 빌드에도 TUI와 의존성을 포함한다.
+    const mod = (await import("./ui/index.js")) as Partial<RenderAppModule>;
     return typeof mod.renderApp === "function" ? (mod as RenderAppModule) : null;
   } catch (err) {
     const code = (err as { code?: string }).code;
@@ -130,7 +131,16 @@ async function main(): Promise<number> {
   }
 
   const cwd = resolve(args.cwd ?? process.cwd());
+  try {
+    if (ensureCredentialsFile()) {
+      process.stderr.write(`API 키 설정 파일을 생성했습니다: ${DEFAULT_CREDENTIALS_PATH}\n사용할 공급자의 api_key에 키를 입력하세요.\n`);
+    }
+  } catch (err) {
+    // 환경변수 인증은 파일 쓰기 실패와 무관하게 사용할 수 있다.
+    process.stderr.write(`설정 파일 생성 실패 (${DEFAULT_CREDENTIALS_PATH}): ${err instanceof Error ? err.message : String(err)}\n`);
+  }
   const permissionMode = args["permission-mode"];
+  const model = args.model ?? (args.resume ? undefined : readDefaultModel());
 
   if (args.prompt !== undefined) {
     return runHeadless({
@@ -138,7 +148,7 @@ async function main(): Promise<number> {
       json: args.json,
       cwd,
       mode: args.mode,
-      model: args.model,
+      model,
       resume: args.resume,
       permissionMode: permissionMode ?? "deny",
       server: args.server,
@@ -167,7 +177,7 @@ async function main(): Promise<number> {
 
     session = args.resume
       ? await connection.loadSession({ sessionId: args.resume, cwd })
-      : await connection.newSession({ cwd, mode: args.mode, model: args.model });
+      : await connection.newSession({ cwd, mode: args.mode, model });
     if (args.resume && args.mode) await session.setMode(args.mode);
     if (args.resume && args.model) await session.setModel(args.model);
 

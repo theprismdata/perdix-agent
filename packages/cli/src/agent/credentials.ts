@@ -1,8 +1,7 @@
 /**
  * `~/.perdix/credentials.json` 읽기/쓰기. 서버 쪽 `config/credentials.py`가 읽는 형식과
  * 그대로 맞아야 한다: `{"<provider>": {"api_key"?, "auth_token"?, "base_url"?}}`.
- * Anthropic은 `ant` CLI(OAuth 프로필)에 위임하므로 이 파일은 그 외 공급자(현재 openai)의
- * API 키 저장용으로만 쓴다.
+ * Anthropic과 OpenAI의 API 키를 저장한다. Anthropic OAuth 로그인은 별도로 `ant`에 위임한다.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -17,6 +16,23 @@ export interface ProviderCredential {
 }
 
 export type CredentialsFile = Record<string, ProviderCredential>;
+
+/** 최초 실행용 템플릿. 기존 파일은 내용이 잘못되어 있어도 보존한다. */
+export function ensureCredentialsFile(path: string = DEFAULT_CREDENTIALS_PATH): boolean {
+  mkdirSync(dirname(path), { recursive: true });
+  const defaults: CredentialsFile = {
+    anthropic: { api_key: "" },
+    openai: { api_key: "" },
+  };
+  try {
+    // 배타적 생성으로 동시 실행 중에도 기존 키를 덮어쓰지 않는다.
+    writeFileSync(path, `${JSON.stringify(defaults, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw err;
+  }
+}
 
 export function readCredentials(path: string = DEFAULT_CREDENTIALS_PATH): CredentialsFile {
   if (!existsSync(path)) return {};
