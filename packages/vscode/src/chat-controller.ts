@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AgentEvent, PermissionAnswer, PermissionRequest, SessionHandle } from "../../cli/src/agent/types.js";
+import type { AgentEvent, PermissionAnswer, PermissionRequest, SessionHandle, SessionInfo } from "../../cli/src/agent/types.js";
 
 export const chatMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ready") }),
@@ -19,6 +19,8 @@ type Entry = AgentEvent | { type: "user_prompt"; text: string };
 export interface ChatDependencies {
   connect(sessionId?: string): Promise<SessionHandle>;
   post(message: unknown): void;
+  /** 서버 연결 전에도 설치 시 정한 기본 에이전트와 모델을 표시한다. */
+  initialInfo?: SessionInfo;
 }
 
 /** 세션과 화면 수명주기를 분리한다. 권한 정책은 서버에 남긴다. */
@@ -36,7 +38,8 @@ export class ChatController {
 
   snapshot(): void {
     this.deps.post({ type: "snapshot", entries: this.entries, busy: this.busy,
-      info: this.session?.info ?? null, permissions: [...this.pending.values()].map((p) => p.request) });
+      info: this.session?.info ?? this.deps.initialInfo ?? null, connected: this.session !== null,
+      permissions: [...this.pending.values()].map((p) => p.request) });
   }
 
   private append(event: Entry): void {
@@ -71,7 +74,8 @@ export class ChatController {
   }
 
   private state(): void {
-    this.deps.post({ type: "state", busy: this.busy, info: this.session?.info ?? null });
+    this.deps.post({ type: "state", busy: this.busy,
+      info: this.session?.info ?? this.deps.initialInfo ?? null, connected: this.session !== null });
   }
 
   async send(text: string): Promise<void> {

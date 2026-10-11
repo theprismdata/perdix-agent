@@ -11,7 +11,17 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
   private readonly controller: ChatController;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    const defaultModel = readDefaultModel();
+    const initialCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "작업 폴더를 열어 주세요";
     this.controller = new ChatController({
+      initialInfo: {
+        sessionId: "",
+        cwd: initialCwd,
+        currentMode: "chat",
+        modes: [{ id: "chat", name: "기본 에이전트 · Chat" }],
+        currentModel: defaultModel ?? null,
+        models: defaultModel ? [{ value: defaultModel, name: defaultModel }] : [],
+      },
       post: (message) => { void this.view?.webview.postMessage(message); },
       connect: async (sessionId) => {
         const cwd = this.workspacePath();
@@ -19,7 +29,7 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
         try {
           return sessionId
             ? await connection.loadSession({ cwd, sessionId })
-            : await connection.newSession({ cwd, model: readDefaultModel(), mode: "chat" });
+            : await connection.newSession({ cwd, model: defaultModel, mode: "chat" });
         } catch (error) { await connection.close(); throw error; }
       },
     });

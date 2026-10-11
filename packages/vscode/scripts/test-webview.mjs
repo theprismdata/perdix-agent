@@ -37,8 +37,13 @@ try {
   assert.deepEqual(await page.evaluate(() => window.sent.at(-1)), { type: "send", text: "프로젝트를 설명해줘" });
   const info = { cwd: "C:/Projects/Perdix", modes: [{ id: "chat", name: "채팅" }, { id: "build", name: "구현" }], currentMode: "chat", models: [{ value: "fake", name: "테스트 모델" }], currentModel: "fake" };
   const post = (data) => page.evaluate((message) => window.dispatchEvent(new MessageEvent("message", { data: message })), data);
+  const initialInfo = { cwd: "C:/Projects/Perdix", modes: [{ id: "chat", name: "기본 에이전트 · Chat" }], currentMode: "chat", models: [{ value: "gpt-6.1-sol", name: "gpt-6.1-sol" }], currentModel: "gpt-6.1-sol" };
+  await post({ type: "snapshot", entries: [], permissions: [], busy: false, info: initialInfo, connected: false });
+  assert.equal(await page.locator("#mode option:checked").textContent(), "기본 에이전트 · Chat");
+  assert.equal(await page.locator("#model option:checked").textContent(), "gpt-6.1-sol");
+  assert.equal(await page.locator("#mode").isDisabled(), true);
   const entries = [{ type: "user_prompt", text: "프로젝트를 설명해줘" }, { type: "agent_text", text: "Python 서버와 TypeScript 클라이언트로 구성된 프로젝트입니다.\n" }];
-  await post({ type: "snapshot", entries, permissions: [], busy: true, info });
+  await post({ type: "snapshot", entries, permissions: [], busy: true, info, connected: true });
   await post({ type: "event", event: { type: "agent_text", text: "<img src=x onerror=alert(1)>" } });
   assert.equal(await page.locator("#messages img").count(), 0);
   assert.ok((await page.locator("#messages").innerText()).includes("<img src=x onerror=alert(1)>"));
@@ -51,7 +56,7 @@ try {
   assert.equal(await page.locator(".permission").count(), 0);
   await page.locator("#cancel").click();
   assert.deepEqual(await page.evaluate(() => window.sent.at(-1)), { type: "cancel" });
-  await post({ type: "state", busy: false, info });
+  await post({ type: "state", busy: false, info, connected: true });
   await page.locator("#mode").selectOption("build");
   assert.deepEqual(await page.evaluate(() => window.sent.at(-1)), { type: "mode", value: "build" });
   await post({ type: "snapshot", entries, permissions: [request], busy: true, info });

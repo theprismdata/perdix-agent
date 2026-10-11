@@ -52,10 +52,10 @@
     if (e.type === 'usage') byId('usage').textContent = e.used.toLocaleString() + ' / ' + e.size.toLocaleString();
     scroll();
   }
-  function options(id, values, selected) {
+  function options(id, values, selected, connected) {
     const select = byId(id); select.replaceChildren();
     for (const value of values) { const option = document.createElement('option'); option.value = value.value || value.id; option.textContent = value.name; select.append(option); }
-    select.value = selected || ''; select.disabled = busy || !values.length;
+    select.value = selected || ''; select.disabled = busy || !values.length || !connected;
   }
   function state(message) {
     busy = message.busy;
@@ -63,8 +63,8 @@
     byId('new').disabled = busy; byId('history').disabled = busy;
     byId('status').textContent = busy ? '작업 중…' : message.info ? '준비됨 · ' + message.info.cwd : '메시지를 보내면 연결합니다';
     if (message.info) {
-      options('mode', message.info.modes, message.info.currentMode);
-      options('model', message.info.models, message.info.currentModel);
+      options('mode', message.info.modes, message.info.currentMode, message.connected);
+      options('model', message.info.models, message.info.currentModel, message.connected);
     } else { byId('mode').disabled = true; byId('model').disabled = true; }
   }
   function permission(request) {

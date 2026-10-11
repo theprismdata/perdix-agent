@@ -23,6 +23,15 @@ function fixture() {
 const permissionRequest: PermissionRequest = { requestId: "r", toolCallId: "t", title: "파일 쓰기", options: [{ optionId: "allow", name: "허용", kind: "allow_once" }] };
 
 describe("Webview chat", () => {
+  it("shows the configured agent and model before starting the server", () => {
+    const post = vi.fn();
+    const initialInfo = { sessionId: "", cwd: "/work", currentMode: "chat", currentModel: "gpt-default",
+      modes: [{ id: "chat", name: "기본 에이전트 · Chat" }], models: [{ value: "gpt-default", name: "gpt-default" }] };
+    const controller = new ChatController({ connect: vi.fn(), post, initialInfo });
+    controller.snapshot();
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ info: initialInfo, connected: false }));
+  });
+
   it("rejects invalid or oversized messages at the host boundary", () => {
     expect(chatMessage.safeParse({ type: "send", text: " " }).success).toBe(false);
     expect(chatMessage.safeParse({ type: "send", text: "a".repeat(100_001) }).success).toBe(false);
