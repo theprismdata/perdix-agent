@@ -23,6 +23,7 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 
 `dist/Perdix-Setup-windows-x64.exe`를 실행하고 공급자와 API 키를 입력하면 설치가 끝난다.
 프로그램, 키 파일, 기본 모델, 바탕화면·시작 메뉴 바로가기를 자동으로 설정한다.
+VS Code가 설치되어 있으면 Perdix Webview 확장도 함께 자동 설치한다.
 키 입력을 비우면 해당 공급자의 기존 저장 키를 사용한다. 첫 설치에는 키가 필요하다.
 설정은 사용자 홈의 `.perdix/credentials.json`과 `.perdix/preferences.json`에 저장한다.
 제거 시 키와 세션 기록은 남긴다. 런타임 설치나 JSON 직접 편집은 필요 없다.

@@ -51,10 +51,10 @@ function Invoke-Checked {
 Push-Location $repoRoot
 try {
     New-Item -ItemType Directory -Force $releaseRoot, $buildRoot | Out-Null
-    Write-Host '[1/5] Installing locked dependencies...'
+    Write-Host '[1/6] Installing locked dependencies...'
     Invoke-Checked 'pnpm' @('install', '--frozen-lockfile')
     Invoke-Checked 'uv' @('sync', '--locked', '--project', 'server')
-    Write-Host '[2/5] Building CLI...'
+    Write-Host '[2/6] Building CLI...'
     Invoke-Checked 'pnpm' @('--filter', '@perdix/protocol', 'build')
     $defines = @('--define', 'process.env.DEV=false', '--define', "process.env.NODE_ENV='production'")
     $probeSource = Join-Path $workRoot 'build-probe.js'
@@ -63,14 +63,17 @@ try {
     Invoke-Checked 'bun' (@('build', $probeSource, '--target=bun', '--outfile', $probeBundle) + $defines)
     Invoke-Checked 'bun' @($probeBundle)
     Invoke-Checked 'bun' (@('build', './packages/cli/src/main.ts', '--compile', '--target=bun-windows-x64', '--outfile', (Join-Path $releaseRoot 'perdix.exe')) + $defines)
-    Write-Host '[3/5] Building Python server...'
+    Write-Host '[3/6] Building VS Code extension...'
+    Invoke-Checked 'pnpm' @('--filter', 'perdix-vscode', 'build')
+    Invoke-Checked 'pnpm' @('--filter', 'perdix-vscode', 'exec', 'vsce', 'package', '--no-dependencies', '--allow-missing-repository', '--out', (Join-Path $releaseRoot 'perdix-vscode-0.0.1.vsix'))
+    Write-Host '[4/6] Building Python server...'
     Invoke-Checked 'uv' @('run', '--project', 'server', '--locked', '--with', 'pyinstaller==6.22.3', 'pyinstaller', '--noconfirm', '--clean', '--onedir', '--name', 'server', '--distpath', $releaseRoot, '--workpath', $buildRoot, '--specpath', $buildRoot, '--paths', (Join-Path $repoRoot 'server/src'), '--collect-all', 'acp', '--collect-all', 'anthropic', '--collect-all', 'openai', '--collect-all', 'jsonschema_specifications', (Join-Path $repoRoot 'server/scripts/frozen_entry.py'))
     Move-Item -LiteralPath (Join-Path $releaseRoot 'server/server.exe') -Destination (Join-Path $releaseRoot 'server/perdix-server.exe') -Force
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows-README.txt') -Destination (Join-Path $releaseRoot 'README.txt')
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows/credentials.example.json') -Destination $releaseRoot -Force
-    Write-Host '[4/5] Building installer...'
+    Write-Host '[5/6] Building installer...'
     & (Join-Path $PSScriptRoot 'build-installer.ps1') -ReleaseDirectory $releaseRoot -InnoCompiler $InnoCompiler
-    Write-Host '[5/5] Checking binary...'
+    Write-Host '[6/6] Checking binary...'
     Invoke-Checked (Join-Path $releaseRoot 'perdix.exe') @('--version')
     if ($TestInstaller) {
         & (Join-Path $PSScriptRoot 'test-windows-installer.ps1') -ReleaseDirectory $releaseRoot -InnoCompiler $InnoCompiler

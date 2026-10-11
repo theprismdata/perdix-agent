@@ -31,9 +31,10 @@ pnpm build:windows
 
 1. 필요한 도구 확인 및 잠금 파일에 따른 의존성 설치
 2. Bun으로 CLI 실행 파일 생성
-3. PyInstaller로 Python 서버와 의존성 묶기
-4. Inno Setup으로 설치 프로그램 생성
-5. CLI 버전 실행 확인, 설치 파일 SHA256 출력, 임시 빌드 폴더 정리
+3. VS Code Webview 확장 빌드 및 VSIX 생성
+4. PyInstaller로 Python 서버와 의존성 묶기
+5. Inno Setup으로 설치 프로그램 생성
+6. CLI 버전 실행 확인, 설치 파일 SHA256 출력, 임시 빌드 폴더 정리
 
 결과는 `dist/Perdix-Setup-windows-x64.exe`이며, 다음 빌드에서 같은 이름으로 갱신된다. 다른 PC에 전달할 파일도 이 설치 프로그램이다. `dist/`는 Git에 올리지 않으므로 저장소를 받은 뒤 직접 빌드해야 한다.
 
@@ -51,6 +52,8 @@ pnpm build:windows
 ## 설치와 키 설정
 
 설치 프로그램을 실행하고 공급자와 API 키를 입력한다. 프로그램, 기본 모델, 바탕화면 및 시작 메뉴 바로가기를 설치 과정에서 설정한다. API 키 자체는 공급자에게 발급받아야 하며, Perdix가 유효한 키를 자동 발급하지는 않는다.
+
+VS Code가 설치되어 있으면 Perdix Webview 확장도 자동 설치한다. 설치가 끝난 뒤 열려 있던 VS Code에서 **Developer: Reload Window**를 한 번 실행하면 사이드바에 Perdix가 나타난다. VS Code가 없으면 이 단계만 건너뛰며 나중에 VSIX를 직접 설치할 수 있다.
 
 - 프로그램: `%LOCALAPPDATA%\Programs\Perdix`
 - 키: `%USERPROFILE%\.perdix\credentials.json`

@@ -16,6 +16,7 @@ $inputPath = Join-Path $testRoot 'input.json'
 $configRoot = Join-Path $testRoot 'profile/.perdix'
 $credentialsPath = Join-Path $configRoot 'credentials.json'
 $appPath = Join-Path $testRoot 'app/perdix.exe'
+$vsixPath = Join-Path $testRoot 'app/perdix-vscode-0.0.1.vsix'
 
 function Invoke-TestInstall([string]$LogName) {
     $logPath = Join-Path $testRoot $LogName
@@ -36,6 +37,8 @@ if ($preferences.default_model -ne 'gpt-6.1-sol') { throw 'Default model not set
 $desktop = Join-Path $testRoot 'desktop'
 if (@(Get-ChildItem -LiteralPath $desktop -Filter '*.lnk').Count -ne 3) { throw 'Desktop shortcuts missing' }
 if (-not (Test-Path -LiteralPath (Join-Path $testRoot 'start-menu/Perdix.lnk'))) { throw 'Start menu shortcut missing' }
+if (-not (Test-Path -LiteralPath $vsixPath)) { throw 'VS Code extension package missing' }
+if (-not (Test-Path -LiteralPath (Join-Path $testRoot 'vscode-installed.txt'))) { throw 'VS Code extension setup was not run' }
 $shell = New-Object -ComObject WScript.Shell
 if ($shell.CreateShortcut((Join-Path $desktop 'Perdix.lnk')).TargetPath -ne [System.IO.Path]::GetFullPath($appPath)) { throw 'Incorrect desktop target' }
 & $appPath --version
@@ -55,4 +58,4 @@ if ($uninstallProcess.ExitCode -ne 0) { throw 'Uninstall failed' }
 if (Test-Path -LiteralPath $appPath) { throw 'Uninstall left program behind' }
 if (Test-Path -LiteralPath (Join-Path $desktop 'Perdix.lnk')) { throw 'Uninstall left shortcut behind' }
 if (-not (Test-Path -LiteralPath $credentialsPath)) { throw 'Uninstall removed user credentials' }
-Write-Output 'PASS: missing-key rejection, install, API key, default model, shortcuts, upgrade, log privacy, uninstall with credentials preserved'
+Write-Output 'PASS: missing-key rejection, install, API key, default model, shortcuts, VS Code extension, upgrade, log privacy, uninstall with credentials preserved'
