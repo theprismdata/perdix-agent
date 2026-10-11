@@ -3,7 +3,7 @@
  * 발견 순서: 명시적 지정 → 동봉 바이너리 → PATH → 동봉 소스 → 저장소 개발 모드.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, openSync, closeSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, openSync, closeSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -77,7 +77,7 @@ export function resolveServerCommand(opts: ResolveOptions = {}): ServerCommand {
   if (fromEnv && fromEnv.trim()) {
     return { ...splitCommand(fromEnv), source: "env" };
   }
-  const nativeServer = join(opts.executableDir ?? dirname(process.execPath), "server", "perdix-server.exe");
+  const nativeServer = join(opts.executableDir ?? dirname(realpathSync(process.execPath)), "server", process.platform === "win32" ? "perdix-server.exe" : "perdix-server");
   if (existsSync(nativeServer)) return { command: nativeServer, args: [], source: "bundled" };
   const onPath = findOnPath("perdix-server", env);
   if (onPath) return { command: onPath, args: [], source: "path" };

@@ -19,6 +19,10 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 
 `perdix-vscode-0.0.1.vsix`를 **Install from VSIX...**로 설치한 뒤, 사이드바의 Perdix 아이콘을 누른다. 터미널이 아닌 Webview에서 대화·모델 선택·작업 승인·이전 대화 불러오기를 제공한다. Windows 설치 프로그램의 서버와 키 설정을 자동으로 사용한다. 기존 확장을 업데이트했으면 VS Code 창을 다시 로드한다. 자세한 사용법은 [확장 안내](packages/vscode/README.md)를 참고한다.
 
+### macOS 설치 프로그램
+
+`Perdix-Setup-macos-arm64.dmg`를 열고 **Perdix Setup.app**을 실행한다. 공급자·API 키·모델을 설정하면 CLI·서버·VS Code 확장을 함께 설치한다. 새 터미널에서 `perdix`를 실행한다. Apple Silicon용이며 Intel Mac에서는 해당 환경에서 `pnpm build:macos`로 x64용을 빌드한다. 자세한 설치·빌드 방법은 [Mac 설치 안내](docs/macos-installation.md)를 참고한다.
+
 ### Windows 설치 프로그램 (권장)
 
 자세한 준비 사항, 빌드 옵션, 키 설정 및 검증 결과는 [Windows 빌드 안내](docs/windows-build.md)를 참고한다.

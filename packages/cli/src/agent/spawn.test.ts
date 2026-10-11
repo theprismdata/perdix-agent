@@ -16,7 +16,7 @@ describe("resolveServerCommand", () => {
   it("finds the native server beside the executable without runtimes on PATH", () => {
     const root = mkdtempSync(join(tmpdir(), "perdix native "));
     mkdirSync(join(root, "server"));
-    const command = join(root, "server", "perdix-server.exe");
+    const command = join(root, "server", process.platform === "win32" ? "perdix-server.exe" : "perdix-server");
     writeFileSync(command, "");
     expect(resolveServerCommand({ executableDir: root, env: { PATH: "" } })).toEqual({
       command, args: [], source: "bundled",
