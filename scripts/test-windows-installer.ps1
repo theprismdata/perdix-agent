@@ -9,7 +9,13 @@ New-Item -ItemType Directory $testRoot | Out-Null
 $compiler = $InnoCompiler
 if (-not $compiler) { $compiler = Join-Path $env:LOCALAPPDATA 'Programs/Inno Setup 6/ISCC.exe' }
 $releasePath = (Resolve-Path -LiteralPath $ReleaseDirectory).Path
-& $compiler /Q "/DTestRoot=$testRoot" "/DReleaseDir=$releasePath" (Join-Path $PSScriptRoot 'windows/installer.iss')
+$fakeCodeCommand = Join-Path $testRoot 'VS Code/bin/code.cmd'
+[System.IO.Directory]::CreateDirectory((Split-Path -Parent $fakeCodeCommand)) | Out-Null
+[System.IO.File]::WriteAllText(
+    $fakeCodeCommand,
+    "@echo off`r`necho %* > `"$testRoot\vscode-installed.txt`"`r`n"
+)
+& $compiler /Q "/DTestRoot=$testRoot" "/DTestVSCodeCommand=$fakeCodeCommand" "/DReleaseDir=$releasePath" (Join-Path $PSScriptRoot 'windows/installer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Test installer compilation failed' }
 $installer = Join-Path $repoRoot 'dist/Perdix-Setup-test.exe'
 $inputPath = Join-Path $testRoot 'input.json'
@@ -38,7 +44,12 @@ $desktop = Join-Path $testRoot 'desktop'
 if (@(Get-ChildItem -LiteralPath $desktop -Filter '*.lnk').Count -ne 3) { throw 'Desktop shortcuts missing' }
 if (-not (Test-Path -LiteralPath (Join-Path $testRoot 'start-menu/Perdix.lnk'))) { throw 'Start menu shortcut missing' }
 if (-not (Test-Path -LiteralPath $vsixPath)) { throw 'VS Code extension package missing' }
-if (-not (Test-Path -LiteralPath (Join-Path $testRoot 'vscode-installed.txt'))) { throw 'VS Code extension setup was not run' }
+$vscodeInstallMarker = Join-Path $testRoot 'vscode-installed.txt'
+if (-not (Test-Path -LiteralPath $vscodeInstallMarker)) { throw 'VS Code extension setup was not run' }
+$vscodeInstallArguments = Get-Content -LiteralPath $vscodeInstallMarker -Raw
+if ($vscodeInstallArguments -notlike '*--install-extension*perdix-vscode-0.0.1.vsix*--force*') {
+    throw 'VS Code extension setup received incorrect arguments'
+}
 $shell = New-Object -ComObject WScript.Shell
 if ($shell.CreateShortcut((Join-Path $desktop 'Perdix.lnk')).TargetPath -ne [System.IO.Path]::GetFullPath($appPath)) { throw 'Incorrect desktop target' }
 & $appPath --version

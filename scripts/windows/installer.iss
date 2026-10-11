@@ -59,11 +59,7 @@ Name: "{#DesktopDir}\Perdix 시작 안내"; Filename: "{sys}\notepad.exe"; Param
 Name: "{#ProgramsDir}\Perdix"; Filename: "{app}\perdix.exe"; WorkingDir: "{userdocs}"
 
 [Run]
-#ifdef TestRoot
-Filename: "{sys}\cmd.exe"; Parameters: "/C echo installed>""{#TestRoot}\vscode-installed.txt"""; StatusMsg: "VS Code 확장을 설정하는 중입니다..."; Flags: runhidden waituntilterminated
-#else
-Filename: "{code:GetVSCodeExecutable}"; Parameters: "--install-extension ""{app}\perdix-vscode-0.0.1.vsix"" --force"; StatusMsg: "Perdix VS Code 확장을 설치하는 중입니다..."; Flags: runhidden waituntilterminated; Check: HasVSCode
-#endif
+Filename: "{sys}\cmd.exe"; Parameters: "/D /S /C """"{code:GetVSCodeCommand}"" --install-extension ""{app}\perdix-vscode-0.0.1.vsix"" --force"""; StatusMsg: "Perdix VS Code 확장을 설치하는 중입니다..."; Flags: runhidden waituntilterminated; Check: HasVSCode
 Filename: "{app}\perdix.exe"; WorkingDir: "{userdocs}"; Description: "Perdix 실행"; Flags: nowait postinstall skipifsilent
 
 [Code]
@@ -72,14 +68,26 @@ var
   KeyPage: TInputQueryWizardPage;
   SettingsFailed: Boolean;
 
-function FindVSCodeExecutable(var Path: String): Boolean;
+function FindVSCodeCommand(var Path: String): Boolean;
+var
+  ExecutablePath: String;
 begin
-  Path := ExpandConstant('{localappdata}\Programs\Microsoft VS Code\Code.exe');
+  #ifdef TestVSCodeCommand
+  Path := '{#TestVSCodeCommand}';
   if FileExists(Path) then begin Result := True; Exit; end;
-  Path := ExpandConstant('{autopf}\Microsoft VS Code\Code.exe');
+  #endif
+  Path := ExpandConstant('{localappdata}\Programs\Microsoft VS Code\bin\code.cmd');
   if FileExists(Path) then begin Result := True; Exit; end;
-  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Code.exe', '', Path) and FileExists(Path) then begin Result := True; Exit; end;
-  if RegQueryStringValue(HKLM, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Code.exe', '', Path) and FileExists(Path) then begin Result := True; Exit; end;
+  Path := ExpandConstant('{autopf}\Microsoft VS Code\bin\code.cmd');
+  if FileExists(Path) then begin Result := True; Exit; end;
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Code.exe', '', ExecutablePath) then begin
+    Path := AddBackslash(ExtractFileDir(ExecutablePath)) + 'bin\code.cmd';
+    if FileExists(Path) then begin Result := True; Exit; end;
+  end;
+  if RegQueryStringValue(HKLM, 'Software\Microsoft\Windows\CurrentVersion\App Paths\Code.exe', '', ExecutablePath) then begin
+    Path := AddBackslash(ExtractFileDir(ExecutablePath)) + 'bin\code.cmd';
+    if FileExists(Path) then begin Result := True; Exit; end;
+  end;
   Path := '';
   Result := False;
 end;
@@ -88,12 +96,12 @@ function HasVSCode: Boolean;
 var
   Path: String;
 begin
-  Result := FindVSCodeExecutable(Path);
+  Result := FindVSCodeCommand(Path);
 end;
 
-function GetVSCodeExecutable(Param: String): String;
+function GetVSCodeCommand(Param: String): String;
 begin
-  if not FindVSCodeExecutable(Result) then Result := '';
+  if not FindVSCodeCommand(Result) then Result := '';
 end;
 
 function JsonEscape(Value: String): String;

@@ -53,7 +53,7 @@ pnpm build:windows
 
 설치 프로그램을 실행하고 공급자와 API 키를 입력한다. 프로그램, 기본 모델, 바탕화면 및 시작 메뉴 바로가기를 설치 과정에서 설정한다. API 키 자체는 공급자에게 발급받아야 하며, Perdix가 유효한 키를 자동 발급하지는 않는다.
 
-VS Code가 설치되어 있으면 Perdix Webview 확장도 자동 설치한다. 설치가 끝난 뒤 열려 있던 VS Code에서 **Developer: Reload Window**를 한 번 실행하면 사이드바에 Perdix가 나타난다. VS Code가 없으면 이 단계만 건너뛰며 나중에 VSIX를 직접 설치할 수 있다.
+VS Code가 설치되어 있으면 VS Code의 `bin\code.cmd` 명령을 통해 Perdix Webview 확장도 자동 설치한다. 설치가 끝난 뒤 열려 있던 VS Code에서 **Developer: Reload Window**를 한 번 실행하면 사이드바에 Perdix가 나타난다. VS Code가 없으면 이 단계만 건너뛰며 나중에 VSIX를 직접 설치할 수 있다.
 
 - 프로그램: `%LOCALAPPDATA%\Programs\Perdix`
 - 키: `%USERPROFILE%\.perdix\credentials.json`
