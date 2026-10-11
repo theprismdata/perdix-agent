@@ -83,3 +83,9 @@ pnpm build:windows
 - Python 테스트: 235개 통과 / 25개 실패, mypy 오류 4개
 
 남은 실패는 Windows에서의 기존 Unix 명령·권한·경로·프로세스 처리 호환성 문제다. 특히 Python 타입 오류는 `os.killpg`와 `signal.SIGKILL` 사용에 해당한다. 설치 검증 통과가 모든 에이전트 기능의 Windows 호환성을 의미하지는 않는다.
+
+### 실행 직후 창이 닫히는 문제 수정
+
+Windows PowerShell 5.1에서 Bun에 전달하는 `NODE_ENV` 정의의 큰따옴표가 사라져, 실제 TUI 실행 시 `production is not defined` 오류가 발생했다. `--version`은 화면 모듈을 불러오지 않아 이 오류를 발견하지 못했다.
+
+빌드 옵션의 문자열을 작은따옴표로 감싸도록 수정했다. 같은 옵션으로 작은 검증 코드를 먼저 번들링하고 실행하여 `NODE_ENV`가 문자열 `production`, `DEV`가 불리언 `false`인지 확인한다. 잘못된 정의는 설치 파일 생성 전에 빌드를 중단시킨다. 수정한 바이너리는 실제 터미널에서 시작 화면과 입력창 표시, 정상 종료까지 확인했다.

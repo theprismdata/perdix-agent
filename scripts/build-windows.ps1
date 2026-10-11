@@ -56,7 +56,13 @@ try {
     Invoke-Checked 'uv' @('sync', '--locked', '--project', 'server')
     Write-Host '[2/5] Building CLI...'
     Invoke-Checked 'pnpm' @('--filter', '@perdix/protocol', 'build')
-    Invoke-Checked 'bun' @('build', './packages/cli/src/main.ts', '--compile', '--target=bun-windows-x64', '--define', 'process.env.DEV=false', '--define', 'process.env.NODE_ENV="production"', '--outfile', (Join-Path $releaseRoot 'perdix.exe'))
+    $defines = @('--define', 'process.env.DEV=false', '--define', "process.env.NODE_ENV='production'")
+    $probeSource = Join-Path $workRoot 'build-probe.js'
+    $probeBundle = Join-Path $workRoot 'build-probe.bundle.js'
+    [IO.File]::WriteAllText($probeSource, "if (process.env.NODE_ENV !== 'production' || process.env.DEV !== false) throw new Error('Invalid build defines');")
+    Invoke-Checked 'bun' (@('build', $probeSource, '--target=bun', '--outfile', $probeBundle) + $defines)
+    Invoke-Checked 'bun' @($probeBundle)
+    Invoke-Checked 'bun' (@('build', './packages/cli/src/main.ts', '--compile', '--target=bun-windows-x64', '--outfile', (Join-Path $releaseRoot 'perdix.exe')) + $defines)
     Write-Host '[3/5] Building Python server...'
     Invoke-Checked 'uv' @('run', '--project', 'server', '--locked', '--with', 'pyinstaller==6.22.3', 'pyinstaller', '--noconfirm', '--clean', '--onedir', '--name', 'server', '--distpath', $releaseRoot, '--workpath', $buildRoot, '--specpath', $buildRoot, '--paths', (Join-Path $repoRoot 'server/src'), '--collect-all', 'acp', '--collect-all', 'anthropic', '--collect-all', 'openai', '--collect-all', 'jsonschema_specifications', (Join-Path $repoRoot 'server/scripts/frozen_entry.py'))
     Move-Item -LiteralPath (Join-Path $releaseRoot 'server/server.exe') -Destination (Join-Path $releaseRoot 'server/perdix-server.exe') -Force
