@@ -14,16 +14,22 @@ PermissionMode = Literal["interactive", "deny", "accept-edits", "allowlist"]
 Rule = Decision | dict[str, Decision]
 
 DEFAULT_RULES: dict[str, Rule] = {
+    "switch_mode": "allow",
     "read": "allow",
     "glob": "allow",
     "grep": "allow",
     "ls": "allow",
+    "memory_read": "allow",
+    "session_search": "allow",
+    "memory_append": "ask",
     "edit": "ask",
     "write": "ask",
     "bash": "ask",
 }
 # deny 모드에서도 allow로 남는 내장 읽기 전용 도구
-READ_ONLY_BUILTINS: frozenset[str] = frozenset({"read", "glob", "grep", "ls"})
+READ_ONLY_BUILTINS: frozenset[str] = frozenset(
+    {"read", "glob", "grep", "ls", "memory_read", "session_search", "switch_mode"}
+)
 EDIT_TOOLS: frozenset[str] = frozenset({"edit", "write"})
 # 이런 문자가 있으면 연결·치환·리다이렉션이 있는 복합 명령으로 보고 allow하지 않는다(ask)
 SHELL_CONTROL_CHARS: tuple[str, ...] = (";", "&", "|", "`", "$(", ">", "<", "\n")

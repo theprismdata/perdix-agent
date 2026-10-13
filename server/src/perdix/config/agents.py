@@ -1,8 +1,6 @@
 """역할별 모델 오버라이드 설정 (architecture.md §6.10).
 
-서브에이전트 프리셋(explore/executor/reviewer/debugger/security-reviewer/compactor/titler)에만
-적용된다.
-메인 세션 모델은 `--model`/`--effort`와 `/model`이 정하며 여기서 다루지 않는다.
+메인 모드(chat/plan/build)와 서브에이전트 프리셋에 적용된다.
 파일 형식은 모델 별칭 표(`models`)와 역할→모델 매핑(`agents`)이다.
 
     {"models": {"cheap": {"provider": "anthropic", "model": "claude-haiku-4-5"}},
@@ -20,7 +18,7 @@ from pydantic import BaseModel
 
 
 class ModelAlias(BaseModel):
-    provider: Literal["anthropic", "openai"] = "anthropic"
+    provider: Literal["anthropic", "openai", "gemini", "openrouter"] = "anthropic"
     model: str
 
 
@@ -39,10 +37,28 @@ class AgentsConfig(BaseModel):
         alias = self.models.get(value)
         return alias.model if alias is not None else value
 
+    def role(self, role_id: str) -> AgentRoleConfig | None:
+        override = self.agents.get(role_id)
+        if override is None:
+            return None
+        return override.model_copy(update={"model": self.resolve(override.model)})
+
+    def provider_for(
+        self, model: str,
+    ) -> Literal["anthropic", "openai", "gemini", "openrouter"] | None:
+        return next(
+            (alias.provider for alias in self.models.values() if alias.model == model), None,
+        )
+
+    def model_ids(self) -> set[str]:
+        return {self.resolve(role.model) for role in self.agents.values()}
+
 
 def load_agents_config(path: Path | None) -> AgentsConfig:
-    """경로가 없으면 빈 설정(오버라이드 없음)을 돌려준다."""
+    """명시적 경로 또는 사용자 설정 폴더의 agents.json을 읽는다."""
     if path is None:
-        return AgentsConfig()
+        path = Path.home() / ".perdix" / "agents.json"
+        if not path.is_file():
+            return AgentsConfig()
     data = json.loads(path.read_text())
     return AgentsConfig.model_validate(data)

@@ -4,6 +4,8 @@ agent-client-protocol==0.12.1
     # via perdix
 aiosqlite==0.22.1
     # via perdix
+annotated-doc==0.0.5
+    # via fastapi
 annotated-types==0.8.0
     # via pydantic
 anthropic==1.11.0
@@ -12,24 +14,55 @@ anyio==4.15.1
     # via
     #   anthropic
     #   httpx2
+    #   openai
+    #   starlette
 ast-serialize==0.12.1
     # via mypy
 attrs==26.1.0
     # via
     #   jsonschema
     #   referencing
+backports-zstd==1.8.0 ; python_full_version < '3.14'
+    # via httpx2
+brotli==1.2.0 ; platform_python_implementation == 'CPython'
+    # via httpx2
+brotlicffi==1.2.0.2 ; platform_python_implementation != 'CPython'
+    # via httpx2
+cffi==2.1.1
+    # via
+    #   brotlicffi
+    #   cryptography
+click==8.5.0
+    # via uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
     # via pytest
+cryptography==50.0.2
+    # via pyjwt
 docstring-parser==0.18.0
     # via anthropic
-h11==0.16.0 ; sys_platform != 'emscripten'
-    # via httpcore2
+fastapi==0.143.0
+    # via perdix
+filelock==4.1.1
+    # via perdix
+h11==0.16.0
+    # via
+    #   httpcore2
+    #   uvicorn
+h2==4.4.1
+    # via httpx2
+hpack==4.2.0
+    # via h2
 httpcore2==2.13.1 ; sys_platform != 'emscripten'
     # via httpx2
 httpx2==2.13.1
-    # via anthropic
+    # via
+    #   anthropic
+    #   openai
+    #   perdix
 httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
     # via httpx2
+hyperframe==6.1.0
+    # via h2
 idna==3.20
     # via
     #   anyio
@@ -37,7 +70,9 @@ idna==3.20
 iniconfig==2.3.1
     # via pytest
 jiter==0.17.0
-    # via anthropic
+    # via
+    #   anthropic
+    #   openai
 jsonschema==4.26.0
     # via perdix
 jsonschema-specifications==2025.9.1
@@ -47,21 +82,31 @@ librt==0.16.0 ; platform_python_implementation != 'PyPy'
 mypy==2.4.0
 mypy-extensions==1.1.0
     # via mypy
+openai==3.26.0
+    # via perdix
+opentelemetry-api==1.45.1
+    # via fastapi
 packaging==26.3
     # via pytest
 pathspec==1.1.1
     # via mypy
 pluggy==1.6.0
     # via pytest
+pycparser==3.11 ; implementation_name != 'PyPy'
+    # via cffi
 pydantic==2.13.5
     # via
     #   agent-client-protocol
     #   anthropic
+    #   fastapi
+    #   openai
     #   perdix
 pydantic-core==2.46.5
     # via pydantic
 pygments==2.21.0
     # via pytest
+pyjwt==2.15.1
+    # via perdix
 pytest==9.1.1
     # via pytest-asyncio
 pytest-asyncio==1.4.0
@@ -76,7 +121,11 @@ rpds-py==2026.9.1
     #   referencing
 ruff==0.16.10
 sniffio==1.3.1
-    # via anthropic
+    # via
+    #   anthropic
+    #   openai
+starlette==1.7.0
+    # via fastapi
 truststore==0.10.4 ; sys_platform != 'emscripten'
     # via
     #   httpcore2
@@ -86,12 +135,20 @@ typing-extensions==4.16.0
     # via
     #   anthropic
     #   anyio
+    #   fastapi
     #   httpx2
     #   mypy
+    #   openai
+    #   opentelemetry-api
     #   pydantic
     #   pydantic-core
     #   pytest-asyncio
     #   referencing
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.4
-    # via pydantic
+    # via
+    #   fastapi
+    #   pydantic
+uvicorn==0.54.0
+    # via perdix

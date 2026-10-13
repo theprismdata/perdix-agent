@@ -8,10 +8,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from perdix.config.credentials import DEFAULT_CREDENTIALS_PATH
+from perdix.memory.schema import MemoryConfig
 from perdix.permissions.policy import PermissionMode
 from perdix.session.store import DEFAULT_DB_PATH
 
-ProviderName = Literal["anthropic", "openai", "fake"]
+ProviderName = Literal["anthropic", "openai", "gemini", "openrouter", "fake"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -22,11 +23,15 @@ DEFAULT_MAX_TOKENS = 32_000
 DEFAULT_MODEL_FOR_PROVIDER: dict[str, str] = {
     "anthropic": DEFAULT_MODEL,
     "openai": "gpt-6.1-sol",
+    "gemini": "gemini-3.8-flash",
+    "openrouter": "qwen/qwen3-coder-flash",
     "fake": DEFAULT_MODEL,
 }
 
 
 class ServerConfig(BaseModel):
+    memories: MemoryConfig = Field(default_factory=MemoryConfig)
+    trust_project: bool = False
     db_path: str = str(DEFAULT_DB_PATH)
     provider: ProviderName = "anthropic"
     model: str = DEFAULT_MODEL

@@ -158,6 +158,41 @@ def tu(id: str, name: str, **input: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------- 실행 순서
 
 
+async def test_memory_written_in_one_session_reaches_another_model_request(
+    store: EventStore, cwd: Path, session_id: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: cwd.parent)
+    writer = FakeProvider([
+        {"tool_uses": [tu("mem", "memory_append", content="shared-memory-sentinel")],
+         "stop": "tool_use"},
+        {"text": "saved", "stop": "end_turn"},
+    ])
+    await run(make_runner(store, cwd, writer), session_id, Recorder(["allow_once"]))
+    second = await store.create_session(str(cwd), "build", "fake", "fake-model")
+    reader = FakeProvider([
+        {"tool_uses": [tu("lookup", "session_search", query="go", scope="project")],
+         "stop": "tool_use"},
+        {"text": "done", "stop": "end_turn"},
+    ])
+    await run(make_runner(store, cwd, reader), second.id, Recorder())
+    assert "shared-memory-sentinel" in reader.requests[0].system
+    lookup = (await results(store, second.id))["lookup"]
+    assert not lookup.is_error
+    assert session_id in lookup.content
+
+
+async def test_denied_memory_write_leaves_no_file(
+    store: EventStore, cwd: Path, session_id: str,
+) -> None:
+    provider = FakeProvider([
+        {"tool_uses": [tu("mem", "memory_append", content="rejected")], "stop": "tool_use"},
+        {"text": "done", "stop": "end_turn"},
+    ])
+    await run(make_runner(store, cwd, provider), session_id, Recorder(["reject_once"]))
+    assert not (cwd / ".perdix" / "MEMORY.md").exists()
+    assert (await results(store, session_id))["mem"].is_error
+
+
 async def test_read_edit_read_is_serialized(store: EventStore, session_id: str, cwd: Path) -> None:
     provider = FakeProvider(
         [
@@ -571,6 +606,50 @@ async def test_cancel_mid_tool(store: EventStore, session_id: str, cwd: Path) ->
     assert {e.tool_use_id for e in rec.of(ToolFailed)} == {"slow", "after"}
     assert rec.events[-1] == TurnEnded(stop_reason="cancelled")
     assert len(provider.requests) == 1
+    await assert_consistent(store, session_id)
+
+
+async def test_progress_arrives_before_tool_and_final_response(
+    store: EventStore, session_id: str, cwd: Path,
+) -> None:
+    progress_received = asyncio.Event()
+    release_tool = asyncio.Event()
+
+    class PausedProvider(FakeProvider):
+        async def stream(self, req: llm.ModelRequest) -> AsyncIterator[llm.ModelEvent]:
+            async for event in super().stream(req):
+                if isinstance(event, llm.ToolUseStart):
+                    await release_tool.wait()
+                yield event
+
+    provider = PausedProvider([
+        {"text": "파일 내용을 확인하겠습니다.", "tool_uses": [tu("r", "read", path="a.txt")]},
+        {"text": "확인을 마쳤습니다."},
+    ])
+    rec = Recorder()
+
+    async def sink(event: HarnessEvent) -> None:
+        await rec.sink(event)
+        if isinstance(event, TextDelta):
+            progress_received.set()
+
+    runner = make_runner(store, cwd, provider)
+    task = asyncio.create_task(runner.run(
+        session_id, prompt(), cancel=asyncio.Event(), sink=sink, ask_permission=rec.ask,
+    ))
+    try:
+        await asyncio.wait_for(progress_received.wait(), timeout=5)
+        assert not task.done()
+        assert not rec.of(ToolStarted)
+        assert [event.text for event in rec.of(TextDelta)] == ["파일 내용을 확인하겠습니다."]
+    finally:
+        release_tool.set()
+        result = await asyncio.wait_for(task, timeout=5)
+    assert result.stop_reason == "end_turn"
+    assert [event.text for event in rec.of(TextDelta)] == [
+        "파일 내용을 확인하겠습니다.", "확인을 마쳤습니다.",
+    ]
+    assert rec.of(ToolFinished)[0].tool_use_id == "r"
     await assert_consistent(store, session_id)
 
 

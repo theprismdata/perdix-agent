@@ -29,8 +29,38 @@ def test_resolve_alias_to_model_id() -> None:
     assert config.resolve("gpt-6.1-sol") == "gpt-6.1-sol"
 
 
-def test_load_agents_config_none_is_empty() -> None:
+def test_load_agents_config_none_is_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert load_agents_config(None) == AgentsConfig()
+
+
+def test_default_config_is_loaded_from_user_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = tmp_path / ".perdix"
+    settings.mkdir()
+    (settings / "agents.json").write_text(json.dumps({
+        "models": {"cheap": {"provider": "openai", "model": "gpt-5.4-mini"}},
+        "agents": {"chat": {"model": "cheap", "effort": "low"}},
+    }))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    config = load_agents_config(None)
+    assert config.role("chat") == AgentRoleConfig(model="gpt-5.4-mini", effort="low")
+    assert config.provider_for("gpt-5.4-mini") == "openai"
+
+
+def test_explicit_file_takes_precedence_over_user_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = tmp_path / ".perdix"
+    settings.mkdir()
+    (settings / "agents.json").write_text('{"agents":{"chat":{"model":"default"}}}')
+    explicit = tmp_path / "explicit.json"
+    explicit.write_text('{"agents":{"chat":{"model":"override"}}}')
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert load_agents_config(explicit).role("chat") == AgentRoleConfig(model="override")
 
 
 def test_load_agents_config_from_file(tmp_path: Path) -> None:

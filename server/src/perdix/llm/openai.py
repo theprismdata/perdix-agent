@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import openai
+from openai.types.responses import ResponseOutputItem
 
 from perdix.context.messages import (
     AssistantItem,
@@ -178,10 +180,12 @@ class OpenAIProvider:
         client: openai.AsyncOpenAI | None = None,
         *,
         api_key: str | None = None,
+        credentials_path: Path | None = None,
     ) -> None:
         self.model = model
         self._client = client
         self._api_key = api_key
+        self._credentials_path = credentials_path
 
     @property
     def client(self) -> openai.AsyncOpenAI:
@@ -194,20 +198,59 @@ class OpenAIProvider:
         return schema
 
     async def stream(self, req: ModelRequest) -> AsyncIterator[ModelEvent]:
+        from perdix.config.credentials import load_credentials
+        from perdix.llm.openai_credentials import oauth_path
+        from perdix.llm.openai_oauth import OpenAiOAuth
+
+        key = self._api_key or load_credentials(self._credentials_path).api_key("openai")
+        if self._client is not None:
+            async for event in self._stream(req, self._client, chatgpt=False):
+                yield event
+            return
+        chatgpt = not key
+        token = key or await OpenAiOAuth(oauth_path(self._credentials_path)).access_token()
+        async with openai.AsyncOpenAI(
+            api_key=token,
+            base_url="https://api.openai.com/v1" if chatgpt else None,
+            max_retries=0,
+        ) as client:
+            async for event in self._stream(req, client, chatgpt=chatgpt):
+                yield event
+
+    async def _stream(
+        self, req: ModelRequest, client: openai.AsyncOpenAI, *, chatgpt: bool,
+    ) -> AsyncIterator[ModelEvent]:
         params = build_params(req, self.model)
+        if chatgpt:
+            params.pop("max_output_tokens", None)
+            params["input"] = [
+                {**item, "namespace": "perdix"} if item.get("type") == "function_call" else item
+                for item in params["input"]
+            ]
+            tools = params.pop("tools", [])
+            if tools:
+                params["tools"] = [{
+                    "type": "namespace",
+                    "name": "perdix",
+                    "description": "프로젝트 파일 조회·수정 및 명령 실행을 위한 Perdix 도구",
+                    "tools": tools,
+                }]
         usage = Usage()
         # function_call 아이템의 Responses 내부 item_id → 우리가 쓰는 id(call_id) 매핑.
         # delta/done 이벤트는 item_id만 주고 call_id는 output_item.added에서만 온다.
         call_ids: dict[str, str] = {}
+        completed_items: dict[int, ResponseOutputItem] = {}
         response: Any = None
         try:
-            stream = await self.client.responses.create(**params, stream=True)
+            stream = await client.responses.create(**params, stream=True)
             async for event in stream:
                 if event.type == "response.output_item.added":
                     item = event.item
                     if item.type == "function_call":
                         call_ids[item.id or event.output_index.__str__()] = item.call_id
                         yield ToolUseStart(id=item.call_id, name=item.name)
+                elif event.type == "response.output_item.done":
+                    completed_items[event.output_index] = event.item
                 elif event.type == "response.output_text.delta":
                     yield TextDelta(text=event.delta)
                 elif event.type in (
@@ -259,7 +302,8 @@ class OpenAIProvider:
         items: list[AssistantItem] = []
         has_tool_use = False
         has_refusal = False
-        for item in response.output:
+        output = response.output or [completed_items[index] for index in sorted(completed_items)]
+        for item in output:
             if item.type == "message":
                 items.extend(_message_items(item))
                 has_refusal = has_refusal or any(p.type == "refusal" for p in item.content)

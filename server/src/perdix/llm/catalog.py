@@ -75,6 +75,40 @@ _MODELS: dict[str, ModelInfo] = {
             output_price=0.50,
             supports_effort=True,
         ),
+        ModelInfo(
+            id="gemini-3.8-flash",
+            provider="gemini",
+            context_window=1_048_576,
+            max_output=65_536,
+            input_price=0.75,
+            output_price=3.75,
+            supports_effort=True,
+        ),
+        ModelInfo(
+            id="qwen/qwen3-coder-flash", provider="openrouter",
+            context_window=1_000_000, max_output=65_536,
+            input_price=0.195, output_price=0.975, supports_effort=False,
+        ),
+        ModelInfo(
+            id="openai/gpt-6-luna", provider="openrouter",
+            context_window=1_050_000, max_output=128_000,
+            input_price=0.10, output_price=0.50, supports_effort=True,
+        ),
+        ModelInfo(
+            id="openai/gpt-6.1-sol", provider="openrouter",
+            context_window=1_050_000, max_output=128_000,
+            input_price=2.0, output_price=10.0, supports_effort=True,
+        ),
+        ModelInfo(
+            id="anthropic/claude-sonnet-5.5", provider="openrouter",
+            context_window=1_000_000, max_output=128_000,
+            input_price=2.0, output_price=10.0, supports_effort=True,
+        ),
+        ModelInfo(
+            id="google/gemini-3.8-flash", provider="openrouter",
+            context_window=1_048_576, max_output=65_536,
+            input_price=0.75, output_price=3.75, supports_effort=True,
+        ),
     )
 }
 

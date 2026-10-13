@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from perdix.context.messages import ContentBlock
 from perdix.harness.turn import AskPermission, Sink, TurnResult, TurnRunner
@@ -58,6 +58,19 @@ class SessionRunner:
         sink: Sink,
         ask_permission: AskPermission,
     ) -> TurnResult:
+        async def execute(runner: TurnRunner, cancel: asyncio.Event) -> TurnResult:
+            return await runner.run(
+                session_id, prompt, cancel=cancel, sink=sink, ask_permission=ask_permission
+            )
+
+        return await self.run(session_id, execute)
+
+    async def run(
+        self,
+        session_id: str,
+        execute: Callable[[TurnRunner, asyncio.Event], Awaitable[TurnResult]],
+    ) -> TurnResult:
+        """Turn 또는 외부 목표 루프 전체에 같은 슬롯과 취소 이벤트를 제공한다."""
         # 여기부터 lock 획득까지 await가 없어야 한다(동기 등록).
         lock = self._locks.setdefault(session_id, asyncio.Lock())
         if lock.locked():
@@ -68,13 +81,7 @@ class SessionRunner:
         async with lock:
             try:
                 runner = self._make_turn_runner(session_id)
-                return await runner.run(
-                    session_id,
-                    prompt,
-                    cancel=cancel,
-                    sink=sink,
-                    ask_permission=ask_permission,
-                )
+                return await execute(runner, cancel)
             finally:
                 if self._cancels.get(session_id) is cancel:
                     del self._cancels[session_id]

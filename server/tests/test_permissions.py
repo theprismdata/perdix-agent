@@ -13,16 +13,20 @@ def bash(cmd: str) -> dict[str, str]:
 
 def test_default_rules() -> None:
     assert DEFAULT_RULES == {
+        "switch_mode": "allow",
         "read": "allow",
         "glob": "allow",
         "grep": "allow",
         "ls": "allow",
+        "memory_read": "allow",
+        "session_search": "allow",
+        "memory_append": "ask",
         "edit": "ask",
         "write": "ask",
         "bash": "ask",
     }
     policy = PermissionPolicy({}, "interactive")
-    for name in ("read", "glob", "grep", "ls"):
+    for name in ("read", "glob", "grep", "ls", "memory_read", "session_search"):
         assert policy.evaluate(name, {"path": "x"}) == "allow"
     for name in ("edit", "write"):
         assert policy.evaluate(name, {"path": "x"}) == "ask"

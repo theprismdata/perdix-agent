@@ -76,6 +76,7 @@ async def spawn_subagent(
     ask_permission: AskPermission = _deny_ask,
     model: str | None = None,
     agents_config: AgentsConfig | None = None,
+    on_step: Callable[[], Awaitable[None]] | None = None,
 ) -> SubagentOutcome:
     """`preset_id` 프리셋으로 격리된 하위 세션을 만들어 `task`를 실행하고 결과를 모은다."""
     preset = get_preset(preset_id, agents_config)
@@ -100,6 +101,7 @@ async def spawn_subagent(
         model=effective_model,
         max_tokens=max_tokens,
         effort=preset.effort,
+        on_step=on_step,
     )
     result = await runner.run(
         record.id,

@@ -10,10 +10,16 @@ dependencies = [
   "pydantic>=2.9",
   "aiosqlite",
   "jsonschema>=4.26.0",
+  "httpx2[http2,brotli,zstd]",
+  "PyJWT[crypto]>=2.10,<3",
+  "filelock>=4.1,<5",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
 ]
 
 [project.scripts]
 perdix-server = "perdix.__main__:main"
+perdix-gateway = "perdix.gateway.__main__:main"
 
 [dependency-groups]
 dev = [

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Perdix 작업을 시작하고 Telegram과 GitHub 요청, 실행 결과와 승인을 확인하세요.">
+  <meta name="color-scheme" content="light dark">
+  <title>작업 대시보드 · Perdix</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/dashboard.css">
+  <script type="module" src="/dashboard.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">본문으로 이동</a>
+  <header class="header">
+    <div><span class="brand">PERDIX / GATEWAY</span><h1>작업 대시보드</h1></div>
+    <div class="actions"><label class="small" for="theme">테마</label><select id="theme"><option value="system">시스템 설정</option><option value="light">밝게</option><option value="dark">어둡게</option></select><button id="disconnect" type="button" class="secondary" hidden>연결 해제</button></div>
+  </header>
+  <main id="main">
+    <p id="notice" role="status" aria-live="polite"></p>
+    <section id="login-panel" class="panel login" aria-labelledby="login-heading">
+      <p class="eyebrow">작업 공간 연결</p><h2 id="login-heading">게이트웨이에 연결하세요</h2>
+      <p class="muted">연결 토큰을 입력하면 등록된 프로젝트와 작업을 확인할 수 있습니다.</p>
+      <form id="login-form" class="stack">
+        <label for="token">연결 토큰</label><input id="token" type="password" required minlength="24" autocomplete="off" spellcheck="false">
+        <button type="submit">연결하기</button>
+      </form>
+      <p class="muted small">토큰은 현재 브라우저 탭에만 저장됩니다.</p>
+    </section>
+    <div id="workspace" hidden>
+      <section class="channel-bar" aria-label="채널 연결 상태"><div><span class="eyebrow">연결된 채널</span><div id="channels" class="actions"></div></div><p class="muted">화면을 닫아도 접수한 작업은 계속 실행됩니다.</p></section>
+      <div class="layout">
+        <div class="stack">
+          <section class="panel" aria-labelledby="new-heading">
+            <h2 id="new-heading">새 작업</h2>
+            <form id="submit-form" class="stack">
+              <div class="field"><label for="project">프로젝트</label><select id="project" required></select></div>
+              <div class="field"><label for="prompt">작업 내용</label><textarea id="prompt" rows="4" required maxlength="32000" placeholder="수정할 문제와 원하는 결과를 설명하세요."></textarea></div>
+              <button id="submit" type="submit">작업 시작</button>
+              <p id="submit-form-status" class="small" role="status" hidden></p>
+            </form>
+            <details id="github-details"><summary>GitHub 이슈 가져오기</summary>
+              <form id="github-form" class="stack">
+                <p class="muted small">위에서 선택한 프로젝트에 등록된 저장소의 이슈를 가져옵니다.</p>
+                <div class="field"><label for="issue">이슈 번호</label><input id="issue" type="number" min="1" required inputmode="numeric" placeholder="예: 42"></div>
+                <div class="field"><label for="instruction">요청 사항</label><textarea id="instruction" rows="2" maxlength="8000">이 이슈를 분석하고 수정한 뒤 검증해 주세요.</textarea></div>
+                <button type="submit" class="secondary">이슈로 작업 시작</button>
+                <p id="github-form-status" class="small" role="status" hidden></p>
+              </form>
+            </details>
+          </section>
+          <section class="panel" aria-labelledby="jobs-heading"><div class="section-heading"><h2 id="jobs-heading">최근 작업</h2><span id="job-count" class="muted small">0개</span></div>
+            <p id="empty" class="muted">아직 작업이 없습니다. 새 작업을 시작하거나 GitHub 이슈를 가져오세요.</p>
+            <div id="jobs" class="stack" aria-label="작업 목록"></div>
+          </section>
+        </div>
+        <section id="detail" class="panel detail" aria-labelledby="detail-heading">
+          <div class="section-heading"><h2 id="detail-heading" tabindex="-1">작업 상세</h2><button id="cancel" type="button" class="danger" hidden>작업 취소</button></div>
+          <p id="detail-empty" class="muted">목록에서 작업을 선택하면 실행 내용과 결과를 확인할 수 있습니다.</p>
+          <div id="detail-body" hidden><p id="job-meta" class="muted small"></p><p id="job-prompt" class="prompt-copy"></p><div id="permissions" class="stack" aria-label="권한 승인 요청"></div><h3>실행 기록</h3><div id="timeline" class="stack"></div><div id="result" hidden><h3>최종 결과</h3><p id="result-copy" class="log-copy"></p></div></div>
+        </section>
+      </div>
+    </div>
+  </main>
+  <footer>Perdix · 등록한 프로젝트에서 실행하는 코딩 에이전트</footer>
+</body>
+</html>

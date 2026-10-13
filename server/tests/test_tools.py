@@ -56,12 +56,15 @@ def test_validate_input_reports_errors_without_raising() -> None:
 def test_registry_specs_and_read_only() -> None:
     registry = ToolRegistry(builtin_tools())
     names = {s.name for s in registry.specs()}
-    assert names == {"read", "write", "edit", "glob", "grep", "ls", "bash", "task"}
+    assert names == {
+        "read", "write", "edit", "glob", "grep", "ls", "bash", "task",
+        "memory_read", "memory_append", "session_search",
+    }
     for spec in registry.specs():
         assert spec.input_schema["type"] == "object"
         assert spec.description
     ro = registry.read_only_only()
-    assert set(ro.names()) == {"read", "glob", "grep", "ls"}
+    assert set(ro.names()) == {"read", "glob", "grep", "ls", "memory_read", "session_search"}
     assert registry.get("bash") is not None
     assert ro.get("bash") is None
     with pytest.raises(ValueError):

@@ -15,6 +15,7 @@ from perdix.context.messages import DiffDisplay, DisplayContent, TextDisplay
 from perdix.sandbox.base import ExecBackend
 
 if TYPE_CHECKING:
+    from perdix.session.store import EventStore
     from perdix.subagents.spawn import SubagentOutcome
 
 ToolKind = Literal["read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other"]
@@ -58,6 +59,8 @@ class ToolContext:
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
     emit: Callable[[DisplayContent], None] = _ignore_display
     spawn_subagent: SpawnSubagent | None = None
+    session_store: EventStore | None = None
+    memory_root: Path | None = None
 
 
 class Tool(Protocol):

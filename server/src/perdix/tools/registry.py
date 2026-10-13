@@ -7,7 +7,9 @@ from collections.abc import Iterable
 from perdix.llm.base import ToolSpec
 from perdix.tools.base import Tool, ToolKind
 from perdix.tools.fs import EditTool, GlobTool, LsTool, ReadTool, WriteTool
+from perdix.tools.memory import MemoryAppendTool, MemoryReadTool
 from perdix.tools.search import GrepTool
+from perdix.tools.session_search import SessionSearchTool
 from perdix.tools.shell import BashTool
 from perdix.tools.task import TaskTool
 
@@ -49,4 +51,7 @@ def builtin_tools() -> list[Tool]:
         LsTool(),
         BashTool(),
         TaskTool(),
+        MemoryReadTool(),
+        MemoryAppendTool(),
+        SessionSearchTool(),
     ]

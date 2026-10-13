@@ -53,6 +53,7 @@ import aiosqlite
 from pydantic import BaseModel, ConfigDict, Field
 
 from perdix.context.messages import AssistantMessage, ToolResult, UserMessage
+from perdix.harness.goal_state import LoopState
 
 SCHEMA_VERSION: Final = 1
 DEFAULT_DB_PATH: Final = Path.home() / ".perdix" / "perdix.db"
@@ -66,6 +67,7 @@ EventKind = Literal[
     "mode_change",
     "config_change",
     "compaction",
+    "loop_state",
 ]
 EVENT_KINDS: Final[frozenset[str]] = frozenset(
     {
@@ -77,6 +79,7 @@ EVENT_KINDS: Final[frozenset[str]] = frozenset(
         "mode_change",
         "config_change",
         "compaction",
+        "loop_state",
     }
 )
 
@@ -129,6 +132,7 @@ _PAYLOAD_MODELS: Final[dict[str, type[BaseModel]]] = {
     "mode_change": ModeChangePayload,
     "config_change": ConfigChangePayload,
     "compaction": CompactionPayload,
+    "loop_state": LoopState,
 }
 
 # ---------------------------------------------------------------- 레코드

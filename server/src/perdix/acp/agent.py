@@ -28,6 +28,10 @@ from acp.schema import (
     AllowedOutcome,
     AudioContentBlock,
     AuthenticateResponse,
+    AuthMethodAgent,
+    AvailableCommand,
+    AvailableCommandInput,
+    AvailableCommandsUpdate,
     BlobResourceContents,
     ClientCapabilities,
     ConfigOptionUpdate,
@@ -63,10 +67,10 @@ from acp.schema import (
 
 from perdix import __version__
 from perdix.acp.mapping import to_session_update
+from perdix.acp.memories import MEMORY_OPTION_IDS, SessionMemories
 from perdix.config.agents import load_agents_config
 from perdix.config.credentials import load_credentials
 from perdix.config.schema import ServerConfig
-from perdix.context.builder import build_system_prompt
 from perdix.context.messages import (
     ContentBlock,
     ImageBlock,
@@ -79,24 +83,32 @@ from perdix.harness.events import (
     PermissionOptionKind,
     PermissionOutcome,
     PermissionRequest,
+    TextDelta,
     ToolFailed,
     ToolFinished,
     ToolStarted,
 )
+from perdix.harness.goal import GoalRunner
+from perdix.harness.goal_commands import LOOP_HELP, LoopCommands, latest_loop, loop_argument
 from perdix.harness.hooks import HookBus
 from perdix.harness.modes import MODES, Mode
 from perdix.harness.runner import SessionRunner, TurnBusyError
-from perdix.harness.turn import TurnRunner, tool_title
+from perdix.harness.turn import TurnResult, TurnRunner, tool_title
+from perdix.harness.verifier import LoopCallbacks
 from perdix.llm import catalog
 from perdix.llm.anthropic import AnthropicProvider
 from perdix.llm.base import Provider, ProviderError
 from perdix.llm.fake import FakeProvider
+from perdix.llm.gemini import GeminiProvider
 from perdix.llm.openai import OpenAIProvider
+from perdix.llm.openrouter import OpenRouterProvider
+from perdix.memory.worker import MemoryWorker
 from perdix.permissions.policy import PermissionMode, PermissionPolicy
 from perdix.sandbox.local import LocalBackend
 from perdix.session.recovery import repair_unpaired_tool_uses
 from perdix.session.store import Event, EventStore, ModeChangePayload, SessionRecord
 from perdix.tools.base import ToolKind, ToolOutput
+from perdix.tools.mode import SwitchModeTool
 from perdix.tools.registry import ToolRegistry, builtin_tools
 
 logger = logging.getLogger(__name__)
@@ -206,6 +218,7 @@ class PerdixAgent:
 
     def __init__(self, config: ServerConfig) -> None:
         self.config = config
+        self._trusted_root = Path.cwd().resolve() if config.trust_project else None
         self._conn: Client | None = None
         self._store: EventStore | None = None
         self._store_lock = asyncio.Lock()
@@ -221,6 +234,11 @@ class PerdixAgent:
                 raise ValueError("--provider fake requires --fake-script PATH")
             self._fake = FakeProvider.from_file(config.fake_script)
         self._agents_config = load_agents_config(config.agents_config_path)
+        self._memories = SessionMemories(config.memories)
+        self._memory_fake = (
+            FakeProvider.from_file(config.memories.fake_script)
+            if config.memories.fake_script is not None else None
+        )
         self.client_capabilities: ClientCapabilities | None = None
         # initialize 요청의 `_meta.perdix`와 clientCapabilities의 `_meta.perdix`
         self.client_perdix_meta: dict[str, Any] = {}
@@ -231,15 +249,26 @@ class PerdixAgent:
         async with self._store_lock:
             if self._store is None:
                 self._store = await EventStore.open(self.config.db_path)
+                worker = MemoryWorker(self._store, self.config.memories)
+                self._memories.worker = worker
+                if self._fake is None or self._memory_fake is not None:
+                    worker.start(
+                        lambda model: self._memory_fake or self._provider_for(model),
+                        self._runner.is_running,
+                    )
             return self._store
 
     async def aclose(self) -> None:
+        if self._memories.worker is not None:
+            await self._memories.worker.close()
         if self._store is not None:
             await self._store.close()
             self._store = None
 
     def _provider_name_for(self, model: str) -> str:
-        """카탈로그에 없는 모델은 `--provider` 설정값을 그대로 쓴다."""
+        assigned = self._agents_config.provider_for(model)
+        if assigned is not None:
+            return assigned
         try:
             return catalog.get(model).provider
         except KeyError:
@@ -251,7 +280,13 @@ class PerdixAgent:
         provider = self._providers.get(model)
         if provider is None:
             if self._provider_name_for(model) == "openai":
-                provider = OpenAIProvider(model, api_key=self._credentials.api_key("openai"))
+                provider = OpenAIProvider(model, credentials_path=self.config.credentials_path)
+            elif self._provider_name_for(model) == "gemini":
+                provider = GeminiProvider(model, api_key=self._credentials.api_key("gemini"))
+            elif self._provider_name_for(model) == "openrouter":
+                provider = OpenRouterProvider(
+                    model, api_key=self._credentials.api_key("openrouter"),
+                )
             else:
                 provider = AnthropicProvider(
                     model,
@@ -271,7 +306,22 @@ class PerdixAgent:
     def _make_turn_runner(self, session_id: str) -> TurnRunner:
         state = self._sessions[session_id]
         assert self._store is not None
-        return TurnRunner(
+        async def switch_mode(mode_id: str) -> None:
+            if state.mode.id != mode_id:
+                await self.set_session_mode(session_id, mode_id)
+            runner.mode = state.mode
+            runner.model = state.model
+            runner.provider = self._provider_for(state.model)
+            runner.effort = self._session_effort(state)
+            tools = self._registry.read_only_only() if state.mode.read_only else self._registry
+            available = [tools.get(name) for name in tools.names()]
+            runner.registry = ToolRegistry([
+                *(tool for tool in available if tool is not None),
+                mode_tool,
+            ])
+
+        mode_tool = SwitchModeTool(switch_mode)
+        runner = TurnRunner(
             store=self._store,
             provider=self._provider_for(state.model),
             registry=self._registry,
@@ -281,13 +331,28 @@ class PerdixAgent:
             hooks=HookBus(),
             mode=state.mode,
             cwd=state.cwd,
-            system_prompt_builder=build_system_prompt,
+            system_prompt_builder=lambda cwd, mode: self._memories.prompt(session_id, cwd, mode),
             model=state.model,
             max_tokens=self.config.max_tokens,
-            effort=self._effort_for(state.model),
+            effort=self._session_effort(state),
             provider_factory=self._provider_for,
             agents_config=self._agents_config,
+            memory_root=self.config.memories.root,
         )
+        tools = [runner.registry.get(name) for name in runner.registry.names()]
+        runner.registry = ToolRegistry([*(tool for tool in tools if tool is not None), mode_tool])
+        return runner
+
+    def _session_effort(self, state: _SessionState) -> str | None:
+        role = self._agents_config.role(state.mode.id)
+        if role is not None and role.model == state.model:
+            try:
+                if not catalog.get(state.model).supports_effort:
+                    return None
+            except KeyError:
+                return role.effort
+            return role.effort
+        return self._effort_for(state.model)
 
     def _state(self, session_id: str) -> _SessionState:
         state = self._sessions.get(session_id)
@@ -339,9 +404,24 @@ class PerdixAgent:
                 session_capabilities=SessionCapabilities(list=SessionListCapabilities()),
             ),
             agent_info=Implementation(name="perdix", version=__version__),
+            auth_methods=[AuthMethodAgent(
+                id="openai-chatgpt", name="Continue with ChatGPT",
+                description="OpenAI API 키가 없으면 브라우저에서 ChatGPT로 로그인합니다.",
+            )],
         )
 
     async def authenticate(self, method_id: str, **kwargs: Any) -> AuthenticateResponse | None:
+        if method_id != "openai-chatgpt":
+            raise RequestError.invalid_params({"methodId": method_id})
+        from perdix.llm.openai_credentials import oauth_path
+        from perdix.llm.openai_oauth import OpenAiOAuth
+
+        credentials = load_credentials(self.config.credentials_path)
+        if not credentials.api_key("openai"):
+            try:
+                await OpenAiOAuth(oauth_path(self.config.credentials_path)).access_token()
+            except ProviderError as exc:
+                raise RequestError(-32603, str(exc)) from exc
         return AuthenticateResponse()
 
     # ------------------------------------------------------------ 세션
@@ -358,7 +438,9 @@ class PerdixAgent:
         mode_id = meta.get("mode", DEFAULT_MODE)
         if mode_id not in MODES:
             raise RequestError.invalid_params({"mode": mode_id, "reason": "unknown mode"})
-        model = meta.get("model", self.config.model)
+        role = self._agents_config.role(mode_id)
+        default_model = role.model if role is not None else self.config.model
+        model = meta.get("model", default_model)
         if not isinstance(model, str) or not model:
             raise RequestError.invalid_params({"model": model, "reason": "invalid model"})
         permission_mode = stricter_permission_mode(
@@ -367,7 +449,9 @@ class PerdixAgent:
 
         store = await self._get_store()
         record = await store.create_session(
-            project_path=cwd, mode=mode_id, provider=self.config.provider, model=model
+            project_path=cwd, mode=mode_id,
+            provider=self._fake.name if self._fake is not None else self._provider_name_for(model),
+            model=model,
         )
         if permission_mode != self.config.permission_mode:
             await store.append(
@@ -383,10 +467,11 @@ class PerdixAgent:
             permission_mode=permission_mode,
             policy=PermissionPolicy(mode=permission_mode),
         )
+        await self._advertise_commands(record.id)
         return NewSessionResponse(
             session_id=record.id,
             modes=_session_modes(mode_id),
-            config_options=[_model_option(model)],
+            config_options=[_model_option(model), *self._memories.options(record.id)],
         )
 
     async def load_session(
@@ -415,11 +500,14 @@ class PerdixAgent:
 
         await self._recover(store, session_id)
         events = await store.events(session_id)
+        self._memories.restore(session_id, events)
         self._sessions[session_id] = self._restore_state(record, events, cwd)
         await self._replay(session_id, events)
+        await self._advertise_commands(session_id)
         return LoadSessionResponse(
             modes=_session_modes(self._sessions[session_id].mode.id),
-            config_options=[_model_option(self._sessions[session_id].model)],
+            config_options=[_model_option(self._sessions[session_id].model),
+                            *self._memories.options(session_id)],
         )
 
     async def _recover(self, store: EventStore, session_id: str) -> None:
@@ -458,6 +546,10 @@ class PerdixAgent:
             if remembered is None:
                 continue
             prior = uses.get(decision.tool_use_id)
+            command = ev.payload.get("command")
+            if prior is None and decision.tool_name == "bash" and isinstance(command, str):
+                policy.remember("bash", {"command": command}, remembered)
+                continue
             policy.remember(decision.tool_name, prior.input if prior else {}, remembered)
         return _SessionState(
             id=record.id,
@@ -569,22 +661,38 @@ class PerdixAgent:
         await store.update_session(session_id, mode=mode_id)
         await store.append(session_id, "mode_change", ModeChangePayload(mode=mode_id))
         await self._send(session_id, update_current_mode(mode_id))
+        role = self._agents_config.role(mode_id)
+        if role is not None and role.model != state.model:
+            await self.set_config_option(MODEL_CONFIG_ID, session_id, role.model)
         return SetSessionModeResponse()
 
     async def set_config_option(
         self, config_id: str, session_id: str, value: str | bool, **kwargs: Any
     ) -> SetSessionConfigOptionResponse | None:
         state = self._state(session_id)
+        if config_id in MEMORY_OPTION_IDS:
+            store = await self._get_store()
+            await self._memories.set_option(store, session_id, config_id, value)
+            options = [_model_option(state.model), *self._memories.options(session_id)]
+            await self._send(session_id, ConfigOptionUpdate(
+                session_update="config_option_update", config_options=list(options),
+            ))
+            return SetSessionConfigOptionResponse(config_options=list(options))
         if config_id != MODEL_CONFIG_ID:
             raise RequestError.invalid_params({"configId": config_id, "reason": "unknown option"})
-        allowed = {m.id for m in catalog.all_models()} | {state.model}
+        allowed = (
+            {m.id for m in catalog.all_models()} | {state.model} | self._agents_config.model_ids()
+        )
         if not isinstance(value, str) or value not in allowed:
             raise RequestError.invalid_params({"value": value, "reason": "unknown model"})
         state.model = value
         store = await self._get_store()
-        await store.update_session(session_id, model=value)
+        await store.update_session(
+            session_id, model=value,
+            provider=self._fake.name if self._fake is not None else self._provider_name_for(value),
+        )
         await store.append(session_id, "config_change", {"key": "model", "value": value})
-        options = [_model_option(value)]
+        options = [_model_option(value), *self._memories.options(session_id)]
         await self._send(
             session_id,
             ConfigOptionUpdate(session_update="config_option_update", config_options=list(options)),
@@ -593,12 +701,46 @@ class PerdixAgent:
 
     # ------------------------------------------------------------ Turn
 
+    async def _advertise_commands(self, session_id: str) -> None:
+        if self._conn is not None:
+            await self._conn.session_update(
+                session_id=session_id,
+                update=AvailableCommandsUpdate(
+                    session_update="available_commands_update",
+                    available_commands=[
+                        AvailableCommand(
+                            name="loop",
+                            description="목표를 실행하고 검증 실패 시 수정합니다",
+                            input=AvailableCommandInput.model_validate(
+                                {"hint": "<목표> | status | cancel | resume"}
+                            ),
+                        ),
+                        AvailableCommand(
+                            name="memories", description="메모리 자동 생성과 참조를 제어합니다",
+                            input=AvailableCommandInput.model_validate(
+                                {"hint": "use on|off | generate on|off"}
+                            ),
+                        ),
+                    ],
+                ),
+            )
+
     async def prompt(
         self, session_id: str, prompt: list[PromptBlock], **kwargs: Any
     ) -> PromptResponse:
         self._state(session_id)
-        await self._get_store()
+        store = await self._get_store()
         blocks = to_content_blocks(prompt)
+        if len(blocks) == 1 and isinstance(blocks[0], TextBlock):
+            memory_reply = await self._memories.command(store, session_id, blocks[0].text)
+            if memory_reply is not None:
+                await self._notify(session_id, TextDelta(text=memory_reply))
+                return PromptResponse(stop_reason="end_turn")
+        argument = (
+            loop_argument(blocks[0].text)
+            if len(blocks) == 1 and isinstance(blocks[0], TextBlock)
+            else None
+        )
 
         async def sink(event: HarnessEvent) -> None:
             await self._notify(session_id, event)
@@ -606,10 +748,44 @@ class PerdixAgent:
         async def ask_permission(req: PermissionRequest) -> PermissionOutcome:
             return await self._ask_permission(session_id, req)
 
-        try:
-            result = await self._runner.prompt(
-                session_id, blocks, sink=sink, ask_permission=ask_permission
+        if argument in ("", "status", "cancel"):
+            if argument == "cancel":
+                self._runner.cancel(session_id)
+                text = "목표 루프 중지를 요청했습니다.\n"
+            elif argument == "status":
+                state = await latest_loop(store, session_id)
+                text = (
+                    state.describe(self._runner.is_running(session_id))
+                    if state
+                    else "목표 루프가 없습니다.\n"
+                )
+            else:
+                text = LOOP_HELP
+            await sink(TextDelta(text=text))
+            return PromptResponse(stop_reason="end_turn")
+
+        async def execute_loop(turn: TurnRunner, cancel: asyncio.Event) -> TurnResult:
+            prepared = await LoopCommands(store, self._trusted_root).prepare(
+                session_id, argument or "", self._state(session_id).cwd
             )
+            if isinstance(prepared, str):
+                await sink(TextDelta(text=prepared + "\n"))
+                return TurnResult(stop_reason="end_turn", verification="failed")
+            await store.append(
+                session_id, "user_message", {"content": [b.model_dump() for b in blocks]}
+            )
+            turn.registry = self._registry
+            return await GoalRunner(
+                turn, LoopCallbacks(session_id, cancel, sink, ask_permission)
+            ).run(prepared)
+
+        try:
+            if argument is not None:
+                result = await self._runner.run(session_id, execute_loop)
+            else:
+                result = await self._runner.prompt(
+                    session_id, blocks, sink=sink, ask_permission=ask_permission
+                )
         except TurnBusyError as exc:
             raise RequestError(-32600, str(exc), {"sessionId": session_id}) from exc
         except ProviderError as exc:

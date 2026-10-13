@@ -24,15 +24,22 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"perdix-server {__version__}")
     parser.add_argument("--db", dest="db_path", help="SQLite event log path")
-    parser.add_argument("--provider", choices=["anthropic", "openai", "fake"])
+    parser.add_argument(
+        "--provider", choices=["anthropic", "openai", "gemini", "openrouter", "fake"],
+    )
     parser.add_argument("--model")
+    parser.add_argument("--openai-auth", choices=["login", "status", "logout"])
     parser.add_argument("--effort")
+    parser.add_argument("--memory-config", help="자동 메모리 설정 JSON 파일")
     parser.add_argument(
         "--permission-mode",
         dest="permission_mode",
         choices=["interactive", "deny", "accept-edits", "allowlist"],
     )
     parser.add_argument("--max-tokens", dest="max_tokens", type=int)
+    parser.add_argument(
+        "--trust-project", action="store_true", help="기동 cwd의 프로젝트 설정 신뢰"
+    )
     parser.add_argument("--fake-script", dest="fake_script", help="FakeProvider JSON script")
     parser.add_argument(
         "--agents-config",
@@ -66,7 +73,34 @@ async def _serve(config: ServerConfig) -> None:
 def main() -> None:
     parser = _parser()
     args = parser.parse_args()
+    if args.openai_auth is not None:
+        from pathlib import Path
+
+        from perdix.llm.base import ProviderError
+        from perdix.llm.openai_auth import run_auth
+
+        try:
+            path = Path(args.credentials_path) if args.credentials_path else None
+            print(asyncio.run(run_auth(args.openai_auth, path)))
+        except (ProviderError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1) from exc
+        return
+    del args.openai_auth
+    memory_path = args.memory_config
+    del args.memory_config
     values: dict[str, Any] = {k: v for k, v in vars(args).items() if v is not None}
+    if memory_path is not None:
+        from pathlib import Path
+
+        from perdix.memory.schema import MemoryConfig
+
+        try:
+            values["memories"] = MemoryConfig.model_validate_json(
+                Path(memory_path).read_text(encoding="utf-8")
+            )
+        except (OSError, ValidationError):
+            parser.error("메모리 설정 파일을 읽지 못했습니다")
     try:
         config = ServerConfig(**values)
     except ValidationError as exc:

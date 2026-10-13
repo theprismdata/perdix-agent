@@ -17,6 +17,7 @@ from openai.types.responses import (
     ResponseFunctionCallArgumentsDoneEvent,
     ResponseIncompleteEvent,
     ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
     ResponseTextDeltaEvent,
 )
 
@@ -226,6 +227,31 @@ def request(effort: str | None = "high") -> ModelRequest:
 
 async def collect(p: OpenAIProvider, req: ModelRequest) -> list[ModelEvent]:
     return [e async for e in p.stream(req)]
+
+
+@pytest.mark.parametrize("final_has_output", [False, True])
+async def test_completed_tool_call_is_preserved_once(
+    sdk: StreamRecorder, final_has_output: bool,
+) -> None:
+    item = {
+        "id": "fc_1", "type": "function_call", "call_id": "call_1",
+        "name": "switch_mode", "arguments": '{"mode":"plan"}', "status": "completed",
+    }
+    sdk.events = [
+        ev_item_added(0, item),
+        ev_args_done("fc_1", item["arguments"]),
+        ResponseOutputItemDoneEvent.model_validate({
+            "type": "response.output_item.done", "output_index": 0,
+            "sequence_number": 2, "item": item,
+        }),
+        ev_completed(_response(output=[item] if final_has_output else [])),
+    ]
+    events = await collect(provider(), request())
+    stop = next(event for event in events if isinstance(event, Stop))
+    assert stop.reason == "tool_use"
+    assert stop.message is not None
+    assert len(stop.message.tool_uses()) == 1
+    assert stop.message.tool_uses()[0].input == {"mode": "plan"}
 
 
 def simple_end_turn() -> list[Any]:
