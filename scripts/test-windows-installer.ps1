@@ -30,9 +30,14 @@ function Invoke-TestInstall([string]$LogName) {
     return $process.ExitCode
 }
 
-[System.IO.File]::WriteAllText($inputPath, '{"provider":"openai","api_key":""}')
+[System.IO.File]::WriteAllText($inputPath, '{"provider":"anthropic","api_key":""}')
 if ((Invoke-TestInstall 'empty.log') -eq 0) { throw 'Empty credentials should block first installation' }
 if (Test-Path -LiteralPath $appPath) { throw 'Program installed without credentials' }
+
+[System.IO.File]::WriteAllText($inputPath, '{"provider":"openai","api_key":""}')
+if ((Invoke-TestInstall 'oauth.log') -ne 0) { throw 'OpenAI installation without an API key failed' }
+$credentials = [System.IO.File]::ReadAllText($credentialsPath) | ConvertFrom-Json
+if ($credentials.openai.api_key -ne '') { throw 'OAuth installation must not create an API key' }
 
 [System.IO.File]::WriteAllText($inputPath, '{"provider":"openai","api_key":"test-installer-key-only"}')
 if ((Invoke-TestInstall 'install.log') -ne 0) { throw 'Installation failed' }
@@ -69,4 +74,4 @@ if ($uninstallProcess.ExitCode -ne 0) { throw 'Uninstall failed' }
 if (Test-Path -LiteralPath $appPath) { throw 'Uninstall left program behind' }
 if (Test-Path -LiteralPath (Join-Path $desktop 'Perdix.lnk')) { throw 'Uninstall left shortcut behind' }
 if (-not (Test-Path -LiteralPath $credentialsPath)) { throw 'Uninstall removed user credentials' }
-Write-Output 'PASS: missing-key rejection, install, API key, default model, shortcuts, VS Code extension, upgrade, log privacy, uninstall with credentials preserved'
+Write-Output 'PASS: Anthropic missing-key rejection, OpenAI without API key, install, API key, default model, shortcuts, VS Code extension, upgrade, log privacy, uninstall with credentials preserved'

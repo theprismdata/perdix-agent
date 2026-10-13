@@ -21,7 +21,7 @@ try {
         if ($entry.Value -is [string]) { $key = $entry.Value }
         else { $key = [string]$entry.Value.api_key }
     }
-    if (-not $key -or $key -match '\s') { throw '사용할 공급자의 API 키를 입력하세요. 기존 키가 있으면 빈 칸으로 둘 수 있습니다.' }
+    if ($key -match '\s' -or (-not $key -and $provider -ne 'openai')) { throw 'API 키를 확인하세요. OpenAI는 키 없이 설치한 뒤 ChatGPT로 로그인할 수 있습니다.' }
     if ($ValidateOnly) { exit 0 }
     $preferences = [pscustomobject]@{}
     if (Test-Path -LiteralPath $preferencesPath) {

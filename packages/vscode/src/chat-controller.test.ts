@@ -23,6 +23,24 @@ function fixture() {
 const permissionRequest: PermissionRequest = { requestId: "r", toolCallId: "t", title: "파일 쓰기", options: [{ optionId: "allow", name: "허용", kind: "allow_once" }] };
 
 describe("Webview chat", () => {
+  it("allows status and cancel while a goal prompt is running", async () => {
+    const f = fixture();
+    let finish: (() => void) | undefined;
+    vi.mocked(f.session.prompt).mockImplementationOnce(() => new Promise((resolve) => {
+      finish = () => resolve({ stopReason: "cancelled" });
+    }));
+    const pending = f.controller.send("/loop fix tests");
+    await vi.waitFor(() => expect(f.session.prompt).toHaveBeenCalledWith("/loop fix tests"));
+    await f.controller.send("/loop status");
+    expect(f.session.prompt).toHaveBeenCalledWith("/loop status");
+    expect(f.controller.isBusy).toBe(true);
+    await f.controller.send("/loop cancel");
+    expect(f.session.cancel).toHaveBeenCalledOnce();
+    finish?.();
+    await pending;
+    expect(f.controller.isBusy).toBe(false);
+    await f.controller.dispose();
+  });
   it("connects on opening without prompting and allows configuration before the first prompt", async () => {
     const f = fixture();
     await Promise.all([f.controller.initialize(), f.controller.initialize()]);

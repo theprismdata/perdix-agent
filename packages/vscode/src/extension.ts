@@ -25,7 +25,7 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
       post: (message) => { void this.view?.webview.postMessage(message); },
       connect: async (sessionId) => {
         const cwd = this.workspacePath();
-        const connection = await openExtensionConnection(cwd, this.serverPath());
+        const connection = await openExtensionConnection(cwd, this.serverPath(), vscode.workspace.isTrusted);
         try {
           return sessionId
             ? await connection.loadSession({ cwd, sessionId })

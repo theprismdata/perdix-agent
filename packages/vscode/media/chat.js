@@ -12,7 +12,42 @@
   let connected = false;
   const draft = vscode.getState();
   byId('prompt').value = draft?.draft || '';
-  byId('prompt').addEventListener('input', () => vscode.setState({ draft: byId('prompt').value }));
+  const commands = [
+    { value: '/loop ', label: '/loop <목표>', hint: '실행·검증·수정 반복' },
+    { value: '/loop status', label: '/loop status', hint: '진행 상태 확인' },
+    { value: '/loop cancel', label: '/loop cancel', hint: '목표 루프 중지' },
+    { value: '/loop resume', label: '/loop resume', hint: '저장된 목표 재개' },
+  ];
+  let matches = [];
+  let selected = 0;
+  function control() { return /^\/loop\s+(status|cancel)\s*$/.test(byId('prompt').value.trim()); }
+  function choose(command) {
+    byId('prompt').value = command.value;
+    byId('slash-menu').hidden = true;
+    byId('prompt').setAttribute('aria-expanded', 'false');
+    byId('prompt').removeAttribute('aria-activedescendant');
+    vscode.setState({ draft: command.value });
+    byId('send').disabled = !connected || (busy && !control());
+    byId('prompt').focus();
+  }
+  function menu() {
+    const value = byId('prompt').value;
+    matches = value.startsWith('/') && !control() ? commands.filter((c) => c.value.startsWith(value)) : [];
+    if (busy) matches = matches.filter((c) => c.value === '/loop status' || c.value === '/loop cancel');
+    selected = Math.min(selected, Math.max(0, matches.length - 1));
+    const list = byId('slash-menu'); list.replaceChildren(); list.hidden = !matches.length;
+    byId('prompt').setAttribute('aria-expanded', String(!!matches.length));
+    if (!matches.length) byId('prompt').removeAttribute('aria-activedescendant');
+    for (const [index, command] of matches.entries()) {
+      const button = document.createElement('button'); button.type = 'button'; button.id = 'slash-' + index;
+      button.setAttribute('role', 'option'); button.setAttribute('aria-selected', String(index === selected));
+      button.textContent = command.label + ' · ' + command.hint;
+      button.addEventListener('click', () => choose(command)); list.append(button);
+      if (index === selected) byId('prompt').setAttribute('aria-activedescendant', button.id);
+    }
+    byId('send').disabled = !connected || (busy && !control());
+  }
+  byId('prompt').addEventListener('input', () => { selected = 0; vscode.setState({ draft: byId('prompt').value }); menu(); });
   const welcome = byId('welcome');
   function scroll() { messages.scrollTop = messages.scrollHeight; }
   function row(label, text, kind = 'agent') {
@@ -69,6 +104,7 @@
       options('mode', message.info.modes, message.info.currentMode, message.connected);
       options('model', message.info.models, message.info.currentModel, message.connected);
     } else { byId('mode').disabled = true; byId('model').disabled = true; }
+    menu();
   }
   function permission(request) {
     if (approvals.has(request.requestId)) return;
@@ -94,10 +130,19 @@
     else if (data.type === 'permission_done') { approvals.get(data.requestId)?.remove(); approvals.delete(data.requestId); }
   });
   byId('composer').addEventListener('submit', (e) => {
-    e.preventDefault(); const text = byId('prompt').value.trim(); if (!text || busy || !connected) return;
+    e.preventDefault(); const text = byId('prompt').value.trim(); if (!text || (busy && !control()) || !connected) return;
     send('send', { text }); byId('prompt').value = ''; vscode.setState({ draft: '' });
+    menu();
   });
-  byId('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); byId('composer').requestSubmit(); } });
+  byId('prompt').addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (!byId('slash-menu').hidden) {
+      if (e.key === 'Escape') { e.preventDefault(); byId('slash-menu').hidden = true; byId('prompt').setAttribute('aria-expanded', 'false'); byId('prompt').removeAttribute('aria-activedescendant'); return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); selected = (selected + (e.key === 'ArrowDown' ? 1 : matches.length - 1)) % matches.length; menu(); return; }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') { e.preventDefault(); choose(matches[selected]); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); byId('composer').requestSubmit(); }
+  });
   for (const id of ['cancel', 'new', 'history', 'keys', 'folder', 'settings']) byId(id).addEventListener('click', () => send(id));
   byId('reconnect').addEventListener('click', () => send('ready'));
   for (const id of ['mode', 'model']) byId(id).addEventListener('change', () => send(id, { value: byId(id).value }));

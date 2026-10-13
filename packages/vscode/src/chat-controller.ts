@@ -103,6 +103,11 @@ export class ChatController {
   }
 
   async send(text: string): Promise<void> {
+    if (text.trim() === "/loop cancel") { await this.cancel(); return; }
+    if (this.busy && text.trim() === "/loop status") {
+      await this.session?.prompt(text);
+      return;
+    }
     if (this.busy || this.disposed || !text.trim()) return;
     this.busy = true;
     this.cancelled = false;

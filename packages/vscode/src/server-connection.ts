@@ -26,8 +26,8 @@ export function resolveExtensionServer(
   throw new Error("Perdix 서버를 찾지 못했습니다. Windows 설치 프로그램을 설치하거나 '서버 설정'에서 실행 파일을 지정하세요.");
 }
 
-export async function openExtensionConnection(cwd: string, serverPath: string): Promise<PerdixConnection> {
-  const server = spawnServer(resolveExtensionServer(serverPath), { cwd });
+export async function openExtensionConnection(cwd: string, serverPath: string, trustProject = false): Promise<PerdixConnection> {
+  const server = spawnServer(resolveExtensionServer(serverPath), { cwd, extraArgs: trustProject ? ["--trust-project"] : [] });
   try { return await connectToServer(server); }
   catch (error) { server.kill(); throw error; }
 }
