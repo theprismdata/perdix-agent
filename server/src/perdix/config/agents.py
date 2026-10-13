@@ -11,15 +11,20 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
 
+from perdix.llm import catalog
+
 
 class ModelAlias(BaseModel):
     provider: Literal["anthropic", "openai", "gemini", "openrouter"] = "anthropic"
     model: str
+    capabilities: catalog.ModelInfo | None = None
 
 
 class AgentRoleConfig(BaseModel):
@@ -54,6 +59,48 @@ class AgentsConfig(BaseModel):
         return {self.resolve(role.model) for role in self.agents.values()}
 
 
+AGENT_ROLES = (
+    "chat", "plan", "build", "explore", "executor", "reviewer", "debugger",
+    "security-reviewer", "compactor", "titler",
+)
+
+
+def assign_openrouter(path: Path | None, role: str, model: str) -> AgentsConfig:
+    if role not in AGENT_ROLES:
+        raise ValueError("unknown agent role")
+    target = path or Path.home() / ".perdix" / "agents.json"
+    selected_info = catalog.get(model)
+    config = load_agents_config(path) if target.exists() else AgentsConfig()
+    base_alias = f"openrouter_{role.replace('-', '_')}"
+    alias = base_alias
+    shared = {assigned.model for name, assigned in config.agents.items() if name != role}
+    suffix = 2
+    while alias in shared:
+        alias = f"{base_alias}_{suffix}"
+        suffix += 1
+    config.models[alias] = ModelAlias(
+        provider="openrouter", model=model, capabilities=selected_info,
+    )
+    previous = config.agents.get(role)
+    config.agents[role] = AgentRoleConfig(
+        model=alias, effort=previous.effort if previous else None,
+    )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=target.parent, delete=False) as output:
+            temporary = Path(output.name)
+            output.write(config.model_dump_json(indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, target)
+        catalog.register(selected_info)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return config
+
+
 def load_agents_config(path: Path | None) -> AgentsConfig:
     """명시적 경로 또는 사용자 설정 폴더의 agents.json을 읽는다."""
     if path is None:
@@ -61,4 +108,10 @@ def load_agents_config(path: Path | None) -> AgentsConfig:
         if not path.is_file():
             return AgentsConfig()
     data = json.loads(path.read_text())
-    return AgentsConfig.model_validate(data)
+    config = AgentsConfig.model_validate(data)
+    for alias in config.models.values():
+        if alias.capabilities is not None:
+            catalog.register(alias.capabilities.model_copy(update={
+                "id": alias.model, "provider": alias.provider,
+            }))
+    return config

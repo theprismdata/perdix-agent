@@ -102,6 +102,8 @@ async def spawn_subagent(
         max_tokens=max_tokens,
         effort=preset.effort,
         on_step=on_step,
+        compactor_factory=provider_factory,
+        agents_config=agents_config,
     )
     result = await runner.run(
         record.id,

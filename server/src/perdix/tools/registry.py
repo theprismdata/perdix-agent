@@ -12,6 +12,7 @@ from perdix.tools.search import GrepTool
 from perdix.tools.session_search import SessionSearchTool
 from perdix.tools.shell import BashTool
 from perdix.tools.task import TaskTool
+from perdix.tools.web import WebFetchTool, WebSearchTool
 
 # plan 모드 등 읽기 전용 레지스트리에 남기는 kind
 READ_ONLY_KINDS: frozenset[ToolKind] = frozenset({"read", "search", "think", "fetch"})
@@ -54,4 +55,6 @@ def builtin_tools() -> list[Tool]:
         MemoryReadTool(),
         MemoryAppendTool(),
         SessionSearchTool(),
+        WebSearchTool(),
+        WebFetchTool(),
     ]

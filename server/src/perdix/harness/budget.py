@@ -16,8 +16,7 @@ class BudgetExceeded(Exception):
 class Budget(BaseModel):
     max_steps: int = 200
     max_verify_iterations: int = 3
-    # 모델 컨텍스트 창 대비 압축 시작 비율(압축은 M4).
-    context_ratio: float = 0.75
+    context_ratio: float = Field(default=0.75, gt=0, lt=1)
     # 목표 루프에서만 설정한다. 부모·자식과 여러 Turn이 같은 객체를 소비한다.
     shared_steps_limit: int | None = Field(default=None, ge=1)
     steps_used: int = 0

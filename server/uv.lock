@@ -920,6 +920,7 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "truststore" },
     { name = "uvicorn" },
 ]
 
@@ -944,6 +945,7 @@ requires-dist = [
     { name = "openai", specifier = ">=3.0,<4" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.10,<3" },
+    { name = "truststore", specifier = ">=0.10,<1" },
     { name = "uvicorn", specifier = ">=0.30,<1" },
 ]
 

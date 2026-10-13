@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 from pydantic import BaseModel
 
 from perdix.config.agents import AgentsConfig
+from perdix.context.instructions import load_instructions, render_instructions
 from perdix.context.messages import (
     AssistantItem,
     AssistantMessage,
@@ -180,10 +181,13 @@ class TurnRunner:
         agents_config: AgentsConfig | None = None,
         on_step: Callable[[], Awaitable[None]] | None = None,
         memory_root: Path | None = None,
+        compactor_factory: ProviderFactory | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
         self._base_registry = registry
+        self._instruction_targets: set[Path] = set()
+        self._instruction_versions: dict[Path, str] = {}
         self.registry = registry.read_only_only() if mode.read_only else registry
         self.policy = policy
         self.sandbox = sandbox
@@ -199,6 +203,11 @@ class TurnRunner:
         self._cancel_grace = cancel_grace
         # 서브에이전트 스폰용(task 도구). None이면 이 러너에서는 스폰 불가.
         self.provider_factory = provider_factory
+        self.compactor_factory = compactor_factory or provider_factory
+        self._observed_input: int | None = None
+        self._previous_estimate: int | None = None
+        self._turn_steps = 0
+        self._compaction_steps = 0
         # 서브에이전트 프리셋의 역할별 모델 오버라이드(architecture.md §6.10). None이면 기본 표.
         self.agents_config = agents_config
         self.on_step = on_step
@@ -237,7 +246,8 @@ class TurnRunner:
             session_id, "user_message", UserMessage(content=prompt, origin=origin)
         )
         steps = 0
-        max_tokens = self.max_tokens
+        self._compaction_steps = 0
+        max_tokens = min(self.max_tokens, self._max_output())
         truncated_retried = False
         continued = False
         while True:
@@ -246,16 +256,21 @@ class TurnRunner:
             if self.budget.shared_steps_limit is not None and self.budget.permission_denied:
                 return TurnResult(stop_reason="cancelled")
             try:
-                self.budget.check_steps(steps)
+                self.budget.check_steps(steps + self._compaction_steps)
                 self.budget.consume_step()
             except BudgetExceeded:
                 return TurnResult(stop_reason="max_turn_requests")
             steps += 1
+            self._turn_steps = steps
             if self.on_step is not None:
                 await self.on_step()
 
-            outcome = await self._stream_with_retry(session_id, max_tokens, cancel, sink)
+            try:
+                outcome = await self._stream_with_retry(session_id, max_tokens, cancel, sink)
+            except BudgetExceeded:
+                return TurnResult(stop_reason="max_turn_requests")
             if outcome.usage is not None:
+                self._observed_input = outcome.usage.input_tokens
                 await sink(ContextUsage(used=outcome.usage.input_tokens, size=self._context_size()))
             stop = outcome.stop
             if stop is None:
@@ -339,6 +354,13 @@ class TurnRunner:
             for spec in self.registry.specs()
         ]
         system = self.system_prompt_builder(self.cwd, self.mode)
+        loaded_instructions = load_instructions(self.cwd, tuple(self._instruction_targets))
+        self._instruction_versions = {item.path: item.text for item in loaded_instructions}
+        if self._instruction_targets:
+            base_paths = {item.path for item in load_instructions(self.cwd)}
+            scoped = tuple(item for item in loaded_instructions if item.path not in base_paths)
+            if scoped:
+                system += "\n" + render_instructions(scoped)
         if self.registry.get("switch_mode") is not None:
             system += (
                 "\n매 요청의 의도에 따라 모드를 선택하세요: 질문·설명·조사는 chat, "
@@ -362,6 +384,30 @@ class TurnRunner:
         early_attempts = 0
         midstream_attempts = 0
         req = await self._build_request(session_id, max_tokens)
+        from perdix.context.compaction import estimate_tokens
+        from perdix.harness.compactor import compact_request
+
+        async def notice(text: str) -> None:
+            await sink(TextDelta(text=text))
+
+        async def before_call() -> None:
+            self.budget.check_steps(self._turn_steps + self._compaction_steps)
+            self.budget.consume_step()
+            self._compaction_steps += 1
+            if self.on_step is not None:
+                await self.on_step()
+
+        req = await compact_request(
+            req, events=await self.store.events(session_id), store=self.store,
+            session_id=session_id, provider=self.provider.name, model=self.model,
+            window=self._context_size(), ratio=self.budget.context_ratio,
+            observed_input=self._observed_input, previous_estimate=self._previous_estimate,
+            factory=self.compactor_factory, config=self.agents_config, cancel=cancel,
+            notice=notice, before_call=before_call,
+        )
+        self._previous_estimate = estimate_tokens(req)
+        if cancel.is_set():
+            return _StreamOutcome(stop=None, sent_tool_ids=[], usage=None)
         while True:
             sent: list[str] = []
             got_chunk = [False]
@@ -635,6 +681,28 @@ class TurnRunner:
         """tool_started → pre_tool → run → post_tool → tool_result."""
         assert call.tool is not None
         tool = call.tool
+        raw_path = call.input.get("path")
+        if tool.name in {"read", "write", "edit", "ls", "grep", "glob"} \
+                and isinstance(raw_path, str):
+            try:
+                target = (self.cwd / raw_path).resolve()
+                directory = target if target.is_dir() else target.parent
+                current = load_instructions(self.cwd, (directory,))
+                fresh = tuple(item for item in current
+                              if self._instruction_versions.get(item.path) != item.text)
+                if directory.is_relative_to(self.cwd.resolve()):
+                    self._instruction_targets.add(directory)
+                if fresh and not tool.is_read_only(call.input):
+                    await self._finish(session_id, call, tool_error(
+                        "대상 경로의 프로젝트 규칙을 확인하고 작업을 재시도하세요.\n"
+                        + render_instructions(fresh),
+                    ), sink)
+                    return
+            except (OSError, RuntimeError):
+                await self._finish(session_id, call, tool_error(
+                    "대상 경로의 프로젝트 규칙을 확인하지 못했습니다.",
+                ), sink)
+                return
         await self.store.append(
             session_id,
             "tool_started",

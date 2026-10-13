@@ -21,6 +21,8 @@ DEFAULT_RULES: dict[str, Rule] = {
     "ls": "allow",
     "memory_read": "allow",
     "session_search": "allow",
+    "websearch": "allow",
+    "webfetch": "allow",
     "memory_append": "ask",
     "edit": "ask",
     "write": "ask",

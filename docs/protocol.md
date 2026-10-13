@@ -39,7 +39,7 @@
 | C→A | `session/prompt` | Turn 실행 또는 `/loop` 제어. 응답에 `stopReason`(harness-loop.md §6) |
 | C→A | `session/cancel` | 알림. Turn 취소 후 prompt에 `cancelled`로 정상 응답 |
 | C→A | `session/set_mode` | chat / plan / build. 메인 모델의 `switch_mode` 자동 전환도 동일한 기록·`current_mode_update`를 사용. 역할별 모델 할당이 있으면 `config_option_update`도 통지 |
-| C→A | `session/set_config_option` | 모델 전환(`category: model`), `memory_use` / `memory_generate` (`on` / `off`). 메모리 설정은 `config_change`에 보존한다. 결과는 `config_option_update`로 통지 |
+| C→A | `session/set_config_option` | 모델 전환(`category: model`), `memory_use` / `memory_generate` (`on` / `off`), `openrouter_catalog=refresh` 목록 조회, `agent_model_<role>=<model ID>` 역할 할당 저장. 메모리 설정은 `config_change`에 보존한다. 결과는 `config_option_update`로 통지 |
 | A→C | `session/update` | `user_message_chunk`(리플레이), `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `usage_update`, `session_info_update` |
 | A→C | `session/request_permission` | 권한 `ask`. **`toolCall` 필수**이므로 도구 호출 맥락에서만. verify 명령은 합성 `tool_call`을 먼저 보낸다. 옵션 kind: `allow_once / allow_always / reject_once / reject_always`. `outcome: cancelled` 처리 필수 |
 | A→C | `elicitation/create` | 사용자 질문(`ask_user` 도구)과 프로젝트 신뢰 승인. `sessionId` + 가능하면 `toolCallId`를 넣는다. 클라이언트가 `elicitation.form`을 광고하지 않으면 `ask_user` 도구를 제거하고 신뢰 게이트는 "미신뢰 유지 + `session_info_update`로 안내" |

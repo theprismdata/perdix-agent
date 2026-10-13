@@ -11,6 +11,7 @@ dependencies = [
   "aiosqlite",
   "jsonschema>=4.26.0",
   "httpx2[http2,brotli,zstd]",
+  "truststore>=0.10,<1",
   "PyJWT[crypto]>=2.10,<3",
   "filelock>=4.1,<5",
   "fastapi>=0.115,<1",
@@ -37,13 +38,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/perdix"]
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

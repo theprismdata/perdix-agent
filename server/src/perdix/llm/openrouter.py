@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import ssl
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, assert_never
 
 import httpx2
+import truststore
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from perdix.context.messages import (
@@ -36,6 +38,61 @@ from perdix.llm.base import (
     ToolUseStart,
     Usage,
 )
+
+
+class RemotePricing(BaseModel):
+    prompt: str = "0"
+    completion: str = "0"
+
+
+class RemoteModel(BaseModel):
+    id: str = Field(pattern=r"^[^\s\x00-\x1f\x7f]+$")
+    name: str
+    context_length: int = Field(gt=0)
+    supported_parameters: list[str] = []
+    architecture: dict[str, JsonValue] = {}
+    pricing: RemotePricing = Field(default_factory=RemotePricing)
+    top_provider: dict[str, JsonValue] = {}
+
+
+class RemoteModels(BaseModel):
+    data: list[RemoteModel]
+
+
+async def list_models(
+    transport: httpx2.AsyncBaseTransport | None = None,
+) -> list[tuple[str, catalog.ModelInfo]]:
+    try:
+        async with httpx2.AsyncClient(
+            transport=transport, timeout=20, trust_env=False,
+            verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
+        ) as client:
+            response = await client.get("https://openrouter.ai/api/v1/models")
+            response.raise_for_status()
+            if len(response.content) > 8_000_000:
+                raise ProviderError("OpenRouter 모델 목록이 너무 큽니다.", retryable=False)
+            listing = RemoteModels.model_validate_json(response.content)
+        result: list[tuple[str, catalog.ModelInfo]] = []
+        for entry in listing.data:
+            modalities = entry.architecture.get("output_modalities")
+            if "tools" not in entry.supported_parameters or not isinstance(modalities, list) \
+                    or "text" not in modalities:
+                continue
+            maximum = entry.top_provider.get("max_completion_tokens")
+            output = maximum if isinstance(maximum, int) and maximum > 0 else 4096
+            info = catalog.ModelInfo(
+                id=entry.id, provider="openrouter", context_window=entry.context_length,
+                max_output=min(output, entry.context_length),
+                input_price=float(entry.pricing.prompt) * 1_000_000,
+                output_price=float(entry.pricing.completion) * 1_000_000,
+                supports_effort="reasoning" in entry.supported_parameters,
+            )
+            result.append((entry.name, info))
+        if not result:
+            raise ProviderError("OpenRouter에서 도구 지원 모델을 찾지 못했습니다.", retryable=False)
+        return sorted(result, key=lambda item: item[0].casefold())
+    except (httpx2.HTTPError, ValidationError, ValueError) as exc:
+        raise ProviderError("OpenRouter 모델 목록을 불러오지 못했습니다.", retryable=False) from exc
 
 
 class _Function(BaseModel):
@@ -214,6 +271,7 @@ class OpenRouterProvider:
         try:
             async with httpx2.AsyncClient(
                 transport=self._transport, http2=True,
+                verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT), trust_env=False,
                 limits=httpx2.Limits(max_connections=200, max_keepalive_connections=40,
                                     keepalive_expiry=30.0),
                 timeout=httpx2.Timeout(connect=20.0, read=120.0, write=10.0, pool=10.0),

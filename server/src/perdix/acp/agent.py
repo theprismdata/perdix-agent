@@ -68,7 +68,7 @@ from acp.schema import (
 from perdix import __version__
 from perdix.acp.mapping import to_session_update
 from perdix.acp.memories import MEMORY_OPTION_IDS, SessionMemories
-from perdix.config.agents import load_agents_config
+from perdix.config.agents import AGENT_ROLES, assign_openrouter, load_agents_config
 from perdix.config.credentials import load_credentials
 from perdix.config.schema import ServerConfig
 from perdix.context.messages import (
@@ -234,6 +234,7 @@ class PerdixAgent:
                 raise ValueError("--provider fake requires --fake-script PATH")
             self._fake = FakeProvider.from_file(config.fake_script)
         self._agents_config = load_agents_config(config.agents_config_path)
+        self._openrouter_models: dict[str, str] = {}
         self._memories = SessionMemories(config.memories)
         self._memory_fake = (
             FakeProvider.from_file(config.memories.fake_script)
@@ -244,6 +245,29 @@ class PerdixAgent:
         self.client_perdix_meta: dict[str, Any] = {}
 
     # ------------------------------------------------------------ 내부 도우미
+
+    def _assignment_options(self) -> list[SessionConfigOptionSelect]:
+        options = [SessionConfigOptionSelect(
+            id="openrouter_catalog", name="OpenRouter 모델 목록 갱신", type="select",
+            current_value="refresh",
+            options=[SessionConfigSelectOption(value="refresh", name="목록 불러오기")],
+        )]
+        for role in AGENT_ROLES:
+            assigned = self._agents_config.role(role)
+            current = assigned.model if assigned else ""
+            choices = [SessionConfigSelectOption(
+                value=model, name=name, description="provider: openrouter",
+            )
+                       for model, name in self._openrouter_models.items()]
+            if current not in self._openrouter_models:
+                choices.insert(0, SessionConfigSelectOption(
+                    value=current, name=current or "미할당",
+                ))
+            options.append(SessionConfigOptionSelect(
+                id=f"agent_model_{role}", name=f"에이전트 {role} 모델 할당", type="select",
+                current_value=current, options=choices,
+            ))
+        return options
 
     async def _get_store(self) -> EventStore:
         async with self._store_lock:
@@ -471,7 +495,8 @@ class PerdixAgent:
         return NewSessionResponse(
             session_id=record.id,
             modes=_session_modes(mode_id),
-            config_options=[_model_option(model), *self._memories.options(record.id)],
+            config_options=[_model_option(model), *self._memories.options(record.id),
+                            *self._assignment_options()],
         )
 
     async def load_session(
@@ -507,7 +532,7 @@ class PerdixAgent:
         return LoadSessionResponse(
             modes=_session_modes(self._sessions[session_id].mode.id),
             config_options=[_model_option(self._sessions[session_id].model),
-                            *self._memories.options(session_id)],
+                            *self._memories.options(session_id), *self._assignment_options()],
         )
 
     async def _recover(self, store: EventStore, session_id: str) -> None:
@@ -670,10 +695,45 @@ class PerdixAgent:
         self, config_id: str, session_id: str, value: str | bool, **kwargs: Any
     ) -> SetSessionConfigOptionResponse | None:
         state = self._state(session_id)
+        if config_id == "openrouter_catalog" or config_id.startswith("agent_model_"):
+            if self._runner.is_running(session_id):
+                raise RequestError.invalid_params({"reason": "작업 종료 후 설정하세요."})
+            if config_id == "openrouter_catalog":
+                if value != "refresh":
+                    raise RequestError.invalid_params({"reason": "invalid refresh value"})
+                from perdix.llm.openrouter import list_models
+
+                try:
+                    remote = await list_models()
+                except ProviderError as exc:
+                    raise RequestError.invalid_params({"reason": str(exc)}) from exc
+                self._openrouter_models = {info.id: name for name, info in remote}
+                for _, info in remote:
+                    catalog.register(info)
+            else:
+                role = config_id.removeprefix("agent_model_")
+                if role not in AGENT_ROLES or value not in self._openrouter_models:
+                    raise RequestError.invalid_params({"reason": "unknown agent or model"})
+                assert isinstance(value, str)
+                try:
+                    self._agents_config = assign_openrouter(
+                        self.config.agents_config_path, role, value,
+                    )
+                except (OSError, ValueError) as exc:
+                    raise RequestError.invalid_params({"reason": "agents.json 저장 실패"}) from exc
+                if role == state.mode.id:
+                    await self.set_config_option(MODEL_CONFIG_ID, session_id, value)
+            options = [_model_option(state.model), *self._memories.options(session_id),
+                       *self._assignment_options()]
+            await self._send(session_id, ConfigOptionUpdate(
+                session_update="config_option_update", config_options=list(options),
+            ))
+            return SetSessionConfigOptionResponse(config_options=list(options))
         if config_id in MEMORY_OPTION_IDS:
             store = await self._get_store()
             await self._memories.set_option(store, session_id, config_id, value)
-            options = [_model_option(state.model), *self._memories.options(session_id)]
+            options = [_model_option(state.model), *self._memories.options(session_id),
+                       *self._assignment_options()]
             await self._send(session_id, ConfigOptionUpdate(
                 session_update="config_option_update", config_options=list(options),
             ))
@@ -692,7 +752,8 @@ class PerdixAgent:
             provider=self._fake.name if self._fake is not None else self._provider_name_for(value),
         )
         await store.append(session_id, "config_change", {"key": "model", "value": value})
-        options = [_model_option(value), *self._memories.options(session_id)]
+        options = [_model_option(value), *self._memories.options(session_id),
+                   *self._assignment_options()]
         await self._send(
             session_id,
             ConfigOptionUpdate(session_update="config_option_update", config_options=list(options)),

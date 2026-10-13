@@ -113,6 +113,10 @@ _MODELS: dict[str, ModelInfo] = {
 }
 
 
+def register(info: ModelInfo) -> None:
+    _MODELS[info.id] = info
+
+
 def get(model_id: str) -> ModelInfo:
     """모델 id로 조회. 모르는 id면 KeyError."""
     try:
