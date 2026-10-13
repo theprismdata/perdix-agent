@@ -12,3 +12,5 @@ __pycache__/
 !**/.omc/skills/
 .codepilot/
 .perdix/
+.omo
+server/tests

@@ -1,5 +1,25 @@
 # 프로토콜: ACP 사용 범위와 확장
 
+## 게이트웨이 채널 API
+
+`perdix-gateway`는 기존 ACP 표준을 사용하는 클라이언트다. 아래 HTTP API는 웹·외부
+채널 접수를 위한 제어면이며 ACP 메서드나 `_perdix` 확장을 추가하지 않는다.
+설정은 snake_case, HTTP JSON은 camelCase다. 상세 설정은 [gateway.md](gateway.md).
+
+| HTTP | 경로 | 용도 |
+|---|---|---|
+| GET | `/api/status` | 등록 프로젝트와 채널 상태 |
+| GET/POST | `/api/jobs` | 최근 작업 목록 / `{project, prompt}` 제출 |
+| GET | `/api/jobs/{id}/events?after={seq}` | 커서 이후 이벤트(최대 1000개) |
+| POST | `/api/jobs/{id}/cancel` | 표준 ACP cancel 및 서버 정리 |
+| GET | `/api/jobs/{id}/permissions` | 현재 승인 요청 |
+| POST | `/api/jobs/{id}/permissions/{permissionId}` | `{optionId}` 승인 선택(null은 거절) |
+| POST | `/api/github/import` | `{project, issueNumber, instruction?}` 이슈 가져오기 |
+| POST | `/webhooks/github` | HMAC 서명된 issue_comment 접수 |
+
+`/api/*`는 Bearer 토큰을 요구한다. Webhook은 별도 GitHub 서명을 요구한다.
+작업 단위마다 독립 ACP 세션을 만들며 권한·도구·LLM 판단은 기존 Python 서버가 한다.
+
 ## 1. ACP (Agent Client Protocol)
 
 - 전송: JSON-RPC 2.0 over stdio (1차). WebSocket은 원격 서버 시나리오용으로 예약.
@@ -12,14 +32,14 @@
 | 방향 | 메서드 | Perdix 매핑 |
 |---|---|---|
 | C→A | `initialize` | capability 협상. 클라이언트는 `fs`, `terminal`, `elicitation.form` 지원을 광고. 서버는 `loadSession: true`, `sessionCapabilities.list`를 광고 |
-| C→A | `authenticate` | 1차 미사용(로컬). API 키는 서버 프로세스 env로만 전달 |
+| C→A | `authenticate` | `methodId: openai-chatgpt`. API 키가 있으면 로그인 생략, 없으면 서버가 ChatGPT OAuth를 수행. `initialize.authMethods`로 광고 |
 | C→A | `session/new` | cwd, mcpServers 수신 → Session 생성. 응답에 `modes`(chat/plan/build)와 `configOptions`(model 등). 세션별 덮어쓰기는 `_meta.perdix` |
 | C→A | `session/load` | event log 복구 + 히스토리 리플레이 |
 | C→A | `session/list` | 세션 목록(재개 UI) |
-| C→A | `session/prompt` | Turn 실행. 응답에 `stopReason`(harness-loop.md §6) |
+| C→A | `session/prompt` | Turn 실행 또는 `/loop` 제어. 응답에 `stopReason`(harness-loop.md §6) |
 | C→A | `session/cancel` | 알림. Turn 취소 후 prompt에 `cancelled`로 정상 응답 |
-| C→A | `session/set_mode` | chat / plan / build |
-| C→A | `session/set_config_option` | 모델 전환(`category: model`), 공급자, effort. 결과는 `config_option_update`로 통지 |
+| C→A | `session/set_mode` | chat / plan / build. 메인 모델의 `switch_mode` 자동 전환도 동일한 기록·`current_mode_update`를 사용. 역할별 모델 할당이 있으면 `config_option_update`도 통지 |
+| C→A | `session/set_config_option` | 모델 전환(`category: model`), `memory_use` / `memory_generate` (`on` / `off`). 메모리 설정은 `config_change`에 보존한다. 결과는 `config_option_update`로 통지 |
 | A→C | `session/update` | `user_message_chunk`(리플레이), `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `usage_update`, `session_info_update` |
 | A→C | `session/request_permission` | 권한 `ask`. **`toolCall` 필수**이므로 도구 호출 맥락에서만. verify 명령은 합성 `tool_call`을 먼저 보낸다. 옵션 kind: `allow_once / allow_always / reject_once / reject_always`. `outcome: cancelled` 처리 필수 |
 | A→C | `elicitation/create` | 사용자 질문(`ask_user` 도구)과 프로젝트 신뢰 승인. `sessionId` + 가능하면 `toolCallId`를 넣는다. 클라이언트가 `elicitation.form`을 광고하지 않으면 `ask_user` 도구를 제거하고 신뢰 게이트는 "미신뢰 유지 + `session_info_update`로 안내" |
@@ -57,6 +77,16 @@ SDK 구현 메모:
 
 헤드리스(`perdix -p`)의 기본은 `deny`. 거부된 호출은 `is_error("non-interactive: permission required")`.
 새로 클론한 저장소를 CI에서 돌리려면 `--trust-project`를 함께 준다.
+
+### 1.4 목표 루프 명령
+
+목표 루프의 `/loop <목표>`, `/loop status`, `/loop cancel`, `/loop resume`은 표준
+`session/prompt`의 text 블록 하나로 전달한다. 서버는 `available_commands_update`로
+`loop`와 인자 힌트를 광고한다. 새 `_perdix/` 메서드는 추가하지 않는다.
+진행·종료 사유는 `agent_message_chunk`, 검증 실행은 합성 `tool_call`로 표시한다.
+status/cancel/도움말은 실행 중에도 처리되는 제어 요청이므로 클라이언트의 작업 중 상태를
+해제하지 않는다. 실제 목표 실행 응답의 `_meta.perdix.verification`만 성공 여부를 표시한다.
+상세 계약은 [goal-loop.md](goal-loop.md)에 있다.
 
 ## 2. IDE Bridge (VS Code 확장 ↔ CLI)
 

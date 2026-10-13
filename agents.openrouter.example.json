@@ -1,0 +1,20 @@
+{
+  "models": {
+    "economy": { "provider": "openrouter", "model": "qwen/qwen3-coder-flash" },
+    "balanced": { "provider": "openrouter", "model": "openai/gpt-6.1-sol" },
+    "review": { "provider": "openrouter", "model": "anthropic/claude-sonnet-5.5" },
+    "search": { "provider": "openrouter", "model": "google/gemini-3.8-flash" }
+  },
+  "agents": {
+    "chat": { "model": "economy" },
+    "plan": { "model": "review", "effort": "high" },
+    "build": { "model": "economy" },
+    "explore": { "model": "economy" },
+    "executor": { "model": "economy" },
+    "reviewer": { "model": "review", "effort": "high" },
+    "debugger": { "model": "balanced", "effort": "high" },
+    "security-reviewer": { "model": "review", "effort": "high" },
+    "compactor": { "model": "economy" },
+    "titler": { "model": "economy" }
+  }
+}

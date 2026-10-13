@@ -349,7 +349,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 
 1. **Python 서버 배포 방식**: `uv tool install perdix-server`(권장, 사용자에게 uv 필요) vs PyInstaller 단일 바이너리를 npm 패키지에 동봉(크기 큼, 플랫폼별 빌드). **M2 착수 전 ADR로 확정.**
 2. **검증 명령 자동 탐지 범위**: `package.json` scripts / `pyproject` / `Makefile`에서 test/lint 자동 추출할지, 설정에 명시만 허용할지.
-3. **메모리 자동 기록**: Hermes처럼 에이전트가 MEMORY.md를 스스로 갱신하게 할지, 사용자 명시 요청 시만 할지.
+3. **메모리 자동 기록**: [ADR 0014](adr/0014-automatic-memory.md)에 따라 유휴 대화에서 자동 추출·통합하고 다음 세션에서 참조한다. 프로젝트·전역 범위와 세션별 생성·참조 제어는 [메모리 사용법](memory.md)을 따른다.
 4. **스킬 자동 추출**: Hermes의 "작업 완료 후 스킬 생성"을 1차에 넣을지.
 5. **원격 실행**: ACP WebSocket 전송으로 서버를 원격 호스트에 두는 시나리오를 1차 범위에 둘지.
 

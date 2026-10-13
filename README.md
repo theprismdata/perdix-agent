@@ -7,6 +7,8 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 
 - 설계: [docs/architecture.md](docs/architecture.md)
 - 하네스 루프: [docs/harness-loop.md](docs/harness-loop.md)
+- 슬래시 목표 루프: [docs/goal-loop.md](docs/goal-loop.md)
+- OpenAI API 키 / ChatGPT 로그인: [docs/openai-auth.md](docs/openai-auth.md)
 - 프로토콜: [docs/protocol.md](docs/protocol.md)
 - 결정 기록: [docs/adr/](docs/adr/)
 - 에이전트 작업 지침: [AGENTS.md](AGENTS.md)
@@ -14,6 +16,16 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 현재 상태: Python 코어(이벤트 로그, 하네스 루프, Anthropic 어댑터, 내장 도구, 권한, 샌드박스)와 헤드리스 ACP stdio 서버(M1), 터미널 UI `perdix`(M2)가 동작한다. 구현 순서는 architecture.md 9절, 단계별 스펙은 docs/impl/ 참조.
 
 ## 사용법
+
+여러 단계가 필요한 요청에서는 작업 시작 설명, 주요 발견과 검증 결과를 대화 중에
+짧게 전달하도록 에이전트에 지시한다. 진행 설명은 일반 답변처럼 즉시 스트리밍되며,
+CLI와 VS Code 채팅에서 도구 실행 상태와 함께 볼 수 있다. 설명의 빈도는 모델에
+따라 달라지며, 고정 시간 알림이나 완료율 표시는 제공하지 않는다.
+
+CLI 입력창 위에서는 모델 응답 대기·도구 실행·승인 대기와 경과 시간을 볼 수 있다.
+30초간 새 이벤트가 없으면 수신 대기 안내가 표시된다. 요청 종료 시에는 대화에
+완료·취소·검증 실패 안내를 남기며, 최종 답변이나 도구 결과가 없으면 미완료를 알린다.
+`chat`과 `plan`은 읽기 전용이다. Git 동기화 등 변경 작업은 `/agent build`로 전환한다.
 
 ### VS Code 채팅 화면
 
@@ -57,6 +69,11 @@ pnpm build:windows
 `anthropic`과 `openai`의 `api_key` 기본값은 빈 문자열이다. 사용할 공급자의 키를 넣으면 된다.
 기존 파일은 수정하거나 덮어쓰지 않는다. `--help`, `--version`은 파일을 생성하지 않는다.
 
+OpenAI는 키가 없어도 사용할 수 있다. OpenAI 모델의 첫 요청에서 브라우저로
+ChatGPT 로그인을 진행하고, 이후 저장된 토큰을 자동 갱신한다.
+`perdix auth login --provider openai`로 먼저 로그인할 수도 있다.
+환경변수 또는 파일에 API 키가 있으면 키가 우선한다. [인증 안내](docs/openai-auth.md)
+
 둘 중 하나에 Anthropic API 키를 넣는다.
 
 - 환경변수: `export ANTHROPIC_API_KEY=sk-ant-...`
@@ -65,6 +82,38 @@ pnpm build:windows
 ```json
 {"anthropic": {"api_key": "sk-ant-..."}}
 ```
+
+Gemini는 `GEMINI_API_KEY` 또는 같은 파일의 `gemini.api_key`를 사용한다.
+`perdix auth login --provider gemini --api-key <key>`로 등록하거나 Hermes에서
+`/login gemini`를 실행하고 숨겨진 입력창에 키를 붙여 넣는다.
+키 발급: https://aistudio.google.com/apikey
+`/model gemini-3.8-flash`로 선택할 수 있으며 인증 실패 시 다른 공급자로 우회하지 않는다.
+Gemini 네이티브 어댑터는 텍스트·이미지·도구 호출·도구 결과·토큰 사용량을 처리하고
+동일 모델의 thoughtSignature를 보존한다([ADR 0018](docs/adr/0018-gemini-provider.md)).
+
+OpenRouter는 `OPENROUTER_API_KEY` 또는 `credentials.json`의
+`{"openrouter": {"api_key": "..."}}`로 인증한다. 키 발급은
+https://openrouter.ai/settings/keys 에서 한다. Hermes의 `/login openrouter`는
+키를 숨겨서 입력받으며, CLI에서는
+`perdix auth login --provider openrouter --api-key <key>`로 등록한다.
+`perdix auth status --provider openrouter`로 활성 키의 출처를 확인한다.
+키가 없거나 인증·잔액 오류가 발생하면 다른 공급자로 우회하지 않는다.
+
+`/model qwen/qwen3-coder-flash`, `/model openai/gpt-6.1-sol`,
+`/model anthropic/claude-sonnet-5.5`, `/model google/gemini-3.8-flash`는
+OpenRouter 경유 연결이다. 공급자 접두사 없는 기존 모델 ID는 직접 연결이다.
+프롬프트·도구·권한은 기존 것을 사용하며 공급자 어댑터가 와이어 형식을 변환한다.
+목록 밖 OpenRouter 모델도 `agents.json`의 `models`에 `provider: "openrouter"`로
+등록하고 역할에 할당할 수 있다([ADR 0019](docs/adr/0019-openrouter-provider.md)).
+
+저장소의 [`agents.openrouter.example.json`](agents.openrouter.example.json)을 사용자 설정
+폴더의 `~/.perdix/agents.openrouter.json`에 복사하면 OpenRouter 전용 경제형 설정을
+사용할 수 있다. 대화·코딩·탐색은 Qwen Coder Flash, 검토·계획은 Claude Sonnet,
+디버깅은 GPT Sol을 사용한다. `perdix --agents-config ~/.perdix/agents.openrouter.json`으로
+시작하면 모드 전환·하위 에이전트·인증 후 재연결에도 이 설정을 사용한다. 또는
+기존 `agents.json`을 백업하고 내용으로 적용한 뒤 서버를 재시작한다.
+카탈로그 비용은 2026-10-13 기본 단가에 따른 추정이며 긴 입력·캐시·라우팅·키 충전
+수수료에 따라 실제 청구액은 달라질 수 있다.
 
 ### 2. 실행
 
@@ -83,6 +132,7 @@ perdix
 | `--model <이름>` | 사용할 모델 (예: `claude-sonnet-5-5`) |
 | `--cwd <폴더>` | 작업 폴더 지정 |
 | `--resume <세션ID>` | 이전 대화 이어하기 |
+| `--tui hermes` | Hermes TUI 평가판 ([사용 안내](docs/hermes-tui.md)) |
 | `--list` | 저장된 세션 목록 보기 |
 | `-p "질문"` | 한 번만 묻고 끝내기 (비대화식) |
 | `--json` | `-p`와 함께 쓰면 결과를 JSON 줄로 출력 |
@@ -104,11 +154,15 @@ perdix -p "이 프로젝트 구조를 설명해줘"
 | `/agent <id>` | 에이전트 모드 바꾸기 (`chat`/`plan`/`build`) — 서브에이전트(아래 6번)와는 다른 개념이다 |
 | `/model <이름>` | 모델 바꾸기 |
 | `/sessions` | 저장된 세션 목록 보기 |
+| `/memories` | 자동 메모리 상태 조회 (`use on/off`, `generate on/off`로 세션별 제어) |
 | `/clear` | 화면 지우기 |
 | `/help` | 도움말 보기 |
 | `/quit` (`/exit`) | 종료 (Ctrl+C 두 번도 가능) |
 
 `/`로 시작하지 않는 글은 모두 에이전트에게 보내는 메시지다.
+
+유휴 대화에서 메모리를 자동 추출·통합해 다음 세션에 반영한다. 기본 유휴 기준은
+6시간이며 자세한 설정과 저장 경로는 [메모리 안내](docs/memory.md)를 참고한다.
 
 ### 4. 서버 위치 지정 (보통은 필요 없음)
 
@@ -137,10 +191,11 @@ API 키 없이 스크립트된 응답으로 테스트하고 싶으면 fake 공�
 (cd server && uv run perdix-server --provider fake --fake-script tests/fixtures/demo.json --db /tmp/perdix.db)
 ```
 
-### 6. 역할별 모델 지정 (서브에이전트)
+### 6. 역할별 모델 지정
 
 `task` 도구로 띄우는 서브에이전트(`explore`/`executor`/`reviewer`/`debugger`/`security-reviewer`, 내부 전용 `compactor`/`titler`)는 역할마다
-기본 모델이 다르다. 기본값을 바꾸려면 JSON 설정 파일을 만들어 `perdix-server`에 넘긴다.
+기본 모델이 다르다. 메인 역할 `chat`, `plan`, `build`도 같은 JSON 설정으로 할당한다.
+서버는 사용자 설정 폴더의 `~/.perdix/agents.json`을 자동으로 읽으며 `--agents-config`가 우선한다.
 
 **기본값** (설정을 안 주면 이대로 동작한다)
 
@@ -154,8 +209,25 @@ API 키 없이 스크립트된 응답으로 테스트하고 싶으면 fake 공�
 | `compactor` | `claude-haiku-4-5` | (없음) |
 | `titler` | `claude-haiku-4-5` | (없음) |
 
-이 표는 **서브에이전트만** 적용 대상이다. 메인 대화(지금 응답하고 있는 에이전트)의 모델은
-위에서 설명한 `--model`/`/model`로 따로 바꾼다.
+이 표는 설정 파일이 없을 때의 서브에이전트 기본값이다. 사용자 설정 파일
+`~/.perdix/agents.json`에는 다음처럼 할당할 수 있다.
+
+| 역할 | 모델 |
+|---|---|
+| `chat` | `gpt-6-luna` |
+| `build`, `executor` | `gpt-6.1-sol` |
+| `debugger` | `gpt-6-astra` |
+| `plan`, `security-reviewer` | `claude-opus-5-5` |
+| `reviewer` | `claude-sonnet-5-5` |
+| `explore`, `compactor`, `titler` | `gemini-3.8-flash` |
+
+자동·수동 모드 전환 시 해당 역할의 모델과 effort가 적용된다. 자동 전환에서는
+현재 Turn의 다음 모델 호출부터 바뀌며 화면에도 모델 변경이 전달된다.
+새 세션은 시작 역할의 모델을 사용하지만 CLI `--model` 등 명시적 세션 초기 모델이 우선한다.
+서버 `--model`은 역할 할당이 없을 때의 기본값이다.
+`/model`은 현재 역할의 모델을 바꾸고, 다음 모드 전환에서 사전 할당이 다시 적용된다.
+파일 변경은 서버 재시작 후 적용되며 모든 프로젝트에 같은 할당을 사용한다.
+다른 파일을 사용하려면 `--agents-config`에 절대 경로를 지정한다.
 
 **설정 파일 예시** ([`agents.example.json`](agents.example.json))
 
@@ -251,3 +323,17 @@ cd server
 uv export --format requirements-txt --no-hashes --no-dev --no-emit-project -o requirements.txt
 uv export --format requirements-txt --no-hashes --no-emit-project -o requirements-dev.txt
 ```
+
+### Telegram · GitHub · 웹 대시보드
+
+`perdix-gateway`로 상주 게이트웨이를 실행할 수 있다. 등록한 프로젝트의 작업을
+웹·Telegram·GitHub 이슈에서 접수하고, 웹에서 실행 기록·결과·취소·권한 승인을
+처리한다. 화면을 닫아도 작업은 계속 실행된다.
+
+```bash
+cd server
+uv run perdix-gateway --config /absolute/path/to/gateway.json
+```
+
+환경 변수 `PERDIX_GATEWAY_TOKEN`과 프로젝트 설정이 필요하다.
+[설정과 서비스 연결 방법](docs/gateway.md)을 참고한다.
