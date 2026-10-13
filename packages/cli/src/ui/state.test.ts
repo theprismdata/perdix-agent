@@ -120,12 +120,52 @@ describe("reduce", () => {
     expect(s.running).toBe(false);
     expect(s.live).toEqual([]);
     expect(s.done.map((x) => x.kind)).toEqual(["agent", "notice"]);
-    expect(s.done[1]).toMatchObject({ text: "turn ended: cancelled · verification: failed" });
+    expect(s.done[1]).toMatchObject({ text: "요청이 취소됐습니다." });
   });
 
-  it("does not add a notice for a plain end_turn", () => {
+  it("keeps an explicit completion receipt for a plain end_turn", () => {
     const s = run([{ type: "turn_started" }, { type: "agent_text", text: "ok" }, { type: "turn_ended", stopReason: "end_turn" }]);
-    expect(s.done.map((x) => x.kind)).toEqual(["agent"]);
+    expect(s.done.map((x) => x.kind)).toEqual(["agent", "notice"]);
+    expect(s.result).toContain("응답 완료");
+  });
+
+  it("reports missing tool results instead of claiming completion", () => {
+    const s = run([
+      { type: "turn_started" },
+      { type: "tool_call", toolCallId: "t", title: "read ls .", kind: "read", status: "pending" },
+      { type: "turn_ended", stopReason: "end_turn" },
+    ]);
+    expect(s.result).toContain("처리 미완료");
+    expect(s.result).toContain("도구 1개");
+    expect(s.done[0]).toMatchObject({ endedWithoutResult: true });
+    expect(s.done.at(-1)).toMatchObject({ kind: "notice", text: s.result });
+  });
+
+  it("does not use previous replies as the current turn's final answer", () => {
+    const s = run([
+      { type: "turn_started" }, { type: "agent_text", text: "previous" },
+      { type: "turn_ended", stopReason: "end_turn" },
+      { type: "turn_started" }, { type: "turn_ended", stopReason: "end_turn" },
+    ]);
+    expect(s.result).toContain("최종 답변이 없습니다");
+  });
+
+  it("does not count pre-tool commentary as a final answer", () => {
+    const s = run([
+      { type: "turn_started" }, { type: "agent_text", text: "확인하겠습니다." },
+      { type: "tool_call", toolCallId: "t", title: "ls", kind: "read", status: "completed" },
+      { type: "turn_ended", stopReason: "end_turn" },
+    ]);
+    expect(s.result).toContain("최종 답변이 없습니다");
+  });
+
+  it("distinguishes verification failure and resets the receipt for the next request", () => {
+    const s = run([
+      { type: "turn_started" }, { type: "agent_text", text: "done" },
+      { type: "turn_ended", stopReason: "end_turn", verification: "failed" },
+    ]);
+    expect(s.result).toContain("검증에 실패");
+    expect(reduce(s, { type: "turn_started" }).result).toBeNull();
   });
 
   it("updates usage, mode and model", () => {
@@ -172,6 +212,7 @@ describe("reduceUi", () => {
     const idle = reduceUi(running, { type: "ui_idle" });
     expect(idle.running).toBe(false);
     expect(idle.live).toEqual([]);
+    expect(idle.result).toContain("종료 결과를 받지 못했습니다");
     expect(reduceUi(idle, { type: "ui_idle" })).toBe(idle);
   });
 

@@ -67,10 +67,9 @@ export function modelFromConfig(options: SessionConfigOption[] | null | undefine
   if (!opt || opt.type !== "select") return { current: null, models: [] };
   const models: ModelOption[] = [];
   for (const entry of opt.options) {
-    if ("group" in entry) {
-      for (const o of entry.options) models.push({ value: o.value, name: o.name });
-    } else {
-      models.push({ value: entry.value, name: entry.name });
+    for (const option of "group" in entry ? entry.options : [entry]) {
+      const provider = option.description?.match(/^provider: (\S+)$/)?.[1];
+      models.push({ value: option.value, name: option.name, ...(provider ? { provider } : {}) });
     }
   }
   return { current: opt.currentValue, models };
@@ -240,7 +239,8 @@ export class AgentSession implements SessionHandle {
   }
 
   async prompt(text: string): Promise<{ stopReason: string; verification?: string | null }> {
-    this.emit({ type: "turn_started" });
+    const control = /^\/loop(?:\s+(?:status|cancel))?\s*$/.test(text.trim());
+    if (!control) this.emit({ type: "turn_started" });
     try {
       const res = await this.agent.request("session/prompt", {
         sessionId: this.sessionId,
@@ -249,12 +249,12 @@ export class AgentSession implements SessionHandle {
       const raw = perdixMeta(res._meta, "verification");
       const verification =
         raw === "passed" || raw === "failed" || raw === "skipped" ? raw : null;
-      this.emit({ type: "turn_ended", stopReason: res.stopReason, verification });
+      if (!control) this.emit({ type: "turn_ended", stopReason: res.stopReason, verification });
       return { stopReason: res.stopReason, verification };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.emit({ type: "error", message });
-      this.emit({ type: "turn_ended", stopReason: "error", verification: null });
+      if (!control) this.emit({ type: "turn_ended", stopReason: "error", verification: null });
       return { stopReason: "error", verification: null };
     }
   }

@@ -12,7 +12,7 @@ describe("first-run credentials", () => {
   it("creates the directory and a template without treating empty keys as configured", () => {
     const path = tempPath();
     expect(ensureCredentialsFile(path)).toBe(true);
-    expect(readCredentials(path)).toEqual({ anthropic: { api_key: "" }, openai: { api_key: "" } });
+    expect(readCredentials(path)).toEqual({ anthropic: { api_key: "" }, openai: { api_key: "" }, gemini: { api_key: "" }, openrouter: { api_key: "" } });
     expect(providerStatus("anthropic", "ANTHROPIC_API_KEY", {}, path)).toBe("none");
     expect(providerStatus("openai", "OPENAI_API_KEY", { OPENAI_API_KEY: "env-key" }, path)).toBe("env");
     if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);

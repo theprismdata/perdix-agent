@@ -7,6 +7,7 @@
  * live 앞쪽부터 "정착된" 항목만 done으로 옮기므로 화면 순서는 수신 순서와 같다.
  */
 import type { AgentEvent, SessionInfo, ToolContent } from "../agent/types.js";
+import { requestResult } from "./request-result.js";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -30,6 +31,7 @@ export interface ToolItem {
   content: ToolContent[];
   /** done으로 옮길 때 정해진다. live에서는 렌더러가 결정한다. */
   expanded: boolean;
+  endedWithoutResult?: boolean;
 }
 
 export interface PlanItem {
@@ -50,6 +52,8 @@ export interface State {
   done: TranscriptItem[];
   live: TranscriptItem[];
   running: boolean;
+  turnStartIndex: number;
+  result: string | null;
   mode: string;
   model: string | null;
   usage: Usage | null;
@@ -64,6 +68,8 @@ export function initialState(info: Pick<SessionInfo, "sessionId" | "currentMode"
     done: [],
     live: [],
     running: false,
+    turnStartIndex: 0,
+    result: null,
     mode: info.currentMode,
     model: info.currentModel,
     usage: null,
@@ -114,7 +120,7 @@ function settle(state: State, all: boolean): State {
     }
   }
   const frozen = moved.map((item, i) =>
-    item.kind === "tool" ? { ...item, expanded: i === lastToolIdx || item.status === "failed" } : item,
+    item.kind === "tool" ? { ...item, expanded: i === lastToolIdx || item.status === "failed", endedWithoutResult: all && !isTerminal(item.status) } : item,
   );
   return { ...state, done: [...state.done, ...frozen], live: remaining };
 }
@@ -213,20 +219,17 @@ function applyEvent(state: State, event: AgentEvent): State {
     case "model_changed":
       return { ...state, model: event.model };
     case "turn_started":
-      return { ...state, running: true };
+      return { ...state, running: true, result: null, turnStartIndex: state.done.length + state.live.length };
     case "turn_ended": {
-      let next: State = { ...state, running: false };
-      const notes: string[] = [];
-      if (event.stopReason !== "end_turn") notes.push(`turn ended: ${event.stopReason}`);
-      if (event.verification) notes.push(`verification: ${event.verification}`);
-      if (notes.length > 0) next = pushItem(next, (id) => ({ kind: "notice", id, text: notes.join(" · ") }));
+      const result = requestResult(state, event.stopReason, event.verification);
+      const next = pushItem({ ...state, running: false, result }, (id) => ({ kind: "notice", id, text: result }));
       return settle(next, true);
     }
     case "error":
-      return pushItem(state, (id) => ({ kind: "error", id, text: event.message }));
+      return pushItem({ ...state, result: `처리 오류 · ${event.message}` }, (id) => ({ kind: "error", id, text: event.message }));
     case "server_exit": {
       const next = pushItem(
-        { ...state, running: false, serverExited: true },
+        { ...state, running: false, serverExited: true, result: "서버 연결 종료 · Perdix를 다시 실행하세요." },
         (id) => ({ kind: "error", id, text: `server exited (code ${event.code ?? "null"})` }),
       );
       return settle(next, true);
@@ -256,7 +259,11 @@ export function reduceUi(state: State, action: UiAction): State {
         !state.running,
       );
     case "ui_idle":
-      return state.running ? settle({ ...state, running: false }, true) : state;
+      if (!state.running) return state;
+      return settle(pushItem(
+        { ...state, running: false, result: state.result ?? "처리 미완료 · 종료 결과를 받지 못했습니다. 다시 요청하세요." },
+        (id) => ({ kind: "notice", id, text: state.result ?? "처리 미완료 · 종료 결과를 받지 못했습니다. 다시 요청하세요." }),
+      ), true);
     default:
       return reduce(state, action);
   }

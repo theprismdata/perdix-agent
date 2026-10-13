@@ -147,12 +147,24 @@ export class PerdixConnection {
   }
 
   async loadSession(opts: LoadSessionOptions): Promise<AgentSession> {
-    const res = await this.agent.request("session/load", {
-      sessionId: opts.sessionId,
-      cwd: opts.cwd,
-      mcpServers: [],
-    });
-    return this.register(PerdixConnection.toInfo(opts.sessionId, opts.cwd, res ?? {}));
+    const previous = this.sessions.get(opts.sessionId);
+    this.sessions.delete(opts.sessionId);
+    try {
+      const res = await this.agent.request("session/load", {
+        sessionId: opts.sessionId,
+        cwd: opts.cwd,
+        mcpServers: [],
+      });
+      return this.register(PerdixConnection.toInfo(opts.sessionId, opts.cwd, res ?? {}));
+    } catch (error) {
+      if (previous) {
+        this.sessions.set(opts.sessionId, previous);
+        const early = this.early.get(opts.sessionId) ?? [];
+        this.early.delete(opts.sessionId);
+        for (const notification of early) previous.handleUpdate(notification.update);
+      }
+      throw error;
+    }
   }
 
   async listSessions(cwd?: string): Promise<SessionListItem[]> {
@@ -220,6 +232,7 @@ export interface StartOptions {
   permissionMode?: string;
   /** 서버 argv에 그대로 덧붙일 인자 */
   serverArgs?: string[];
+  trustProject?: boolean;
 }
 
 /** 서버를 찾아 띄우고 연결·initialize까지 한다. */
@@ -227,6 +240,7 @@ export async function startServerConnection(opts: StartOptions): Promise<PerdixC
   const command = resolveServerCommand({ server: opts.server, cwd: opts.cwd });
   const extraArgs = [...(opts.serverArgs ?? [])];
   if (opts.permissionMode) extraArgs.push("--permission-mode", opts.permissionMode);
+  if (opts.trustProject) extraArgs.push("--trust-project");
   const server = spawnServer(command, { extraArgs, debug: opts.debug, cwd: opts.cwd });
   try {
     return await connectToServer(server);

@@ -122,7 +122,7 @@ export interface ToolCardProps {
 }
 
 export function ToolCard({ item, expanded }: ToolCardProps) {
-  const status = STATUS_ICON[item.status];
+  const status = item.endedWithoutResult ? { icon: "!", color: theme.warning } : STATUS_ICON[item.status];
   const kindIcon = KIND_ICON[item.toolKind] ?? KIND_ICON.other;
   const kindColor = theme.toolKind[item.toolKind as keyof typeof theme.toolKind] ?? theme.toolKind.other;
   const summary = summarize(item.content);
@@ -134,6 +134,7 @@ export function ToolCard({ item, expanded }: ToolCardProps) {
           {kindIcon} {item.toolKind}
         </Text>
         <Text> {item.title}</Text>
+        <Text color={status.color}> · {item.endedWithoutResult ? "종료 · 결과 없음" : { pending: "대기", in_progress: "실행 중", completed: "완료", failed: "실패" }[item.status]}</Text>
         {!expanded && summary !== "" && <Text dimColor> ({summary})</Text>}
       </Box>
       {expanded && item.content.length > 0 && (

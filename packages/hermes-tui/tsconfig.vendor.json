@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2023", "lib": ["ES2023"], "module": "ESNext", "moduleResolution": "bundler",
+    "jsx": "react-jsx", "strict": true, "esModuleInterop": true, "skipLibCheck": true,
+    "noEmit": true, "types": ["node"], "resolveJsonModule": true,
+    "paths": {
+      "@hermes/ink": ["./vendor/ui-tui/packages/hermes-ink/index.d.ts"],
+      "@hermes/shared/billing": ["./vendor/apps/shared/src/billing-types.ts"],
+      "@hermes/shared/*": ["./vendor/apps/shared/src/*"]
+    }
+  },
+  "include": ["vendor/ui-tui/src"],
+  "exclude": ["vendor/ui-tui/src/__tests__", "**/*.test.ts", "**/*.test.tsx"]
+}

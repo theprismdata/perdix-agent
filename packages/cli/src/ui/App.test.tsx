@@ -26,6 +26,20 @@ function output(frames: string[]): string {
 }
 
 describe("App", () => {
+  it("forwards memory controls to the server", async () => {
+    const { stdin, session } = await setup();
+    await type(stdin, "/memories generate off");
+    expect(session.prompts).toEqual(["/memories generate off"]);
+    session.finishTurn();
+    await tick();
+  });
+  it("forwards a goal from the slash menu to the server", async () => {
+    const { stdin, session } = await setup();
+    await type(stdin, "/loop fix tests");
+    expect(session.prompts).toEqual(["/loop fix tests"]);
+    session.finishTurn();
+    await tick();
+  });
   it("shows the startup banner until the conversation starts", async () => {
     const { stdin, session, lastFrame } = await setup();
     expect(lastFrame()).toContain("Type a message, or /help for commands.");
@@ -46,6 +60,7 @@ describe("App", () => {
     session.emit({ type: "usage", used: 1000, size: 4000 });
     await tick();
     expect(lastFrame()).toContain("Read a.py");
+    expect(lastFrame()).toContain("도구 실행 중");
     expect(lastFrame()).toContain("(25%)");
     session.emit({ type: "tool_call_update", toolCallId: "t1", status: "completed" });
     session.finishTurn();
@@ -54,6 +69,8 @@ describe("App", () => {
     expect(all).toContain("hello");
     expect(all).toContain("Hi there");
     expect(all).toContain("✓");
+    expect(all).toContain("응답 종료");
+    expect(all).toContain("최종 답변이 없습니다");
   });
 
   it("routes permission requests to the prompt and disables input", async () => {
@@ -70,6 +87,7 @@ describe("App", () => {
     });
     await tick();
     expect(lastFrame()).toContain("Permission required");
+    expect(lastFrame()).toContain("승인 대기");
     await press(stdin, "n");
     await expect(answer).resolves.toEqual({ optionId: "no" });
     expect(lastFrame()).not.toContain("Permission required");
@@ -171,6 +189,66 @@ describe("App", () => {
     await tick();
     expect(onRunAuth).toHaveBeenCalledWith(["login", "--provider", "openai"]);
     expect(output(frames)).toContain("login succeeded");
+  });
+
+  it.each([
+    ["openai", "claude-opus-5-5", "gpt-6.1-sol"],
+    ["anthropic", "gpt-6.1-sol", "claude-opus-5-5"],
+    ["gemini", "gpt-6.1-sol", "gemini-3.8-flash"],
+    ["openrouter", "gpt-6.1-sol", "qwen/qwen3-coder-flash"],
+  ])("explains model switching after %s login", async (provider, currentModel, target) => {
+    const session = new FakeSession({ currentModel, models: [{ value: target, name: target }] });
+    const { stdin, frames } = await setup(session, undefined, vi.fn(async () => 0));
+    await type(stdin, `/login --provider ${provider}`);
+    expect(output(frames)).toContain(`현재 모델: ${currentModel}`);
+    expect(output(frames)).toContain(`/model ${target}`);
+    expect(session.calls).toEqual([]);
+  });
+
+  it("does not suggest a model switch after failed login", async () => {
+    const { stdin, frames } = await setup(new FakeSession(), undefined, vi.fn(async () => 2));
+    await type(stdin, "/login --provider openai");
+    expect(output(frames)).toContain("login failed (exit code 2)");
+    expect(output(frames)).not.toContain("현재 모델:");
+  });
+
+  it("opens provider tabs and signs in with OpenAI on Enter", async () => {
+    const onRunAuth = vi.fn(async () => 0);
+    const { stdin, lastFrame, session } = await setup(new FakeSession(), undefined, onRunAuth);
+    await type(stdin, "/login");
+    expect(lastFrame()).toContain("로그인할 서비스를 선택하세요");
+    expect(lastFrame()).toContain("OpenAI");
+    expect(lastFrame()).toContain("Claude");
+    expect(onRunAuth).not.toHaveBeenCalled();
+    await press(stdin, "x");
+    expect(lastFrame()).not.toContain("❯ x");
+    await press(stdin, "\r");
+    expect(onRunAuth).toHaveBeenCalledExactlyOnceWith(["login", "--provider", "openai"]);
+    expect(session.prompts).toEqual([]);
+  });
+
+  it("selects Claude with Tab and maps it to anthropic", async () => {
+    const onRunAuth = vi.fn(async () => 0);
+    const { stdin } = await setup(new FakeSession(), undefined, onRunAuth);
+    await type(stdin, "/login");
+    await press(stdin, KEY.tab, "\r");
+    expect(onRunAuth).toHaveBeenCalledExactlyOnceWith(["login", "--provider", "anthropic"]);
+  });
+
+  it("cycles provider tabs with arrows and cancels with Escape", async () => {
+    const onRunAuth = vi.fn(async () => 0);
+    const { stdin, lastFrame, session } = await setup(new FakeSession(), undefined, onRunAuth);
+    await type(stdin, "/login");
+    await press(stdin, "\u001b[C", "\u001b[D", "\r");
+    expect(onRunAuth).toHaveBeenCalledExactlyOnceWith(["login", "--provider", "openai"]);
+    await type(stdin, "/login");
+    await press(stdin, "\u001b");
+    expect(lastFrame()).not.toContain("로그인할 서비스를 선택하세요");
+    expect(onRunAuth).toHaveBeenCalledTimes(1);
+    await type(stdin, "hello");
+    expect(session.prompts).toEqual(["hello"]);
+    session.finishTurn();
+    await tick();
   });
 
   it("runs /logout and reports a non-zero exit code as a failure", async () => {

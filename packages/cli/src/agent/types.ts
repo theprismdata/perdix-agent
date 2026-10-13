@@ -15,6 +15,7 @@ export interface ModeInfo {
 export interface ModelOption {
   value: string;
   name: string;
+  provider?: string;
 }
 
 /** 세션 생성/복구 직후 UI가 알아야 하는 정적 정보 */

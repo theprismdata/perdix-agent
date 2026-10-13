@@ -3,7 +3,7 @@
  * uv나 서버가 없으면 skip하지 않고 실패한다(docs/impl/m2.md §1).
  */
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,8 +82,13 @@ describe("integration with perdix-server (fake provider)", () => {
       execFileSync("pnpm", ["exec", "tsup"], { cwd: cliDir, stdio: "inherit" });
     }
     const tmp = mkdtempSync(join(tmpdir(), "perdix-hl-"));
+    const agentsConfig = join(tmp, "agents.json");
+    writeFileSync(agentsConfig, JSON.stringify({
+      models: { economy: { provider: "openrouter", model: "openai/gpt-6-luna" } },
+      agents: { chat: { model: "economy" } },
+    }));
     const serverCmd = ["uv", ...serverArgs(join(tmp, "t.db"))].join(" ");
-    const child = spawn(process.execPath, [mainJs, "-p", "list files", "--json", "--cwd", tmp, "--server", serverCmd], {
+    const child = spawn(process.execPath, [mainJs, "-p", "list files", "--json", "--cwd", tmp, "--server", serverCmd, "--agents-config", agentsConfig], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -97,5 +102,33 @@ describe("integration with perdix-server (fake provider)", () => {
     const events = lines.map((l) => JSON.parse(l) as AgentEvent);
     expect(events[0]).toEqual({ type: "turn_started" });
     expectOrder(events);
+    expect(events).toContainEqual(expect.objectContaining({ type: "usage", size: 1_050_000 }));
+  }, 120_000);
+
+  it("exits 1 when a trusted goal cannot obtain verification permission", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "perdix-loop-hl-"));
+    try {
+      mkdirSync(join(tmp, ".perdix"));
+      writeFileSync(join(tmp, ".perdix", "config.json"), JSON.stringify({
+        verify: { commands: [{ name: "check", run: "node -e \"process.exit(0)\"" }] },
+      }));
+      const script = join(tmp, "fake.json");
+      writeFileSync(script, JSON.stringify([{ text: "done" }]));
+      const serverCmd = ["uv", "run", "--project", serverDir, "perdix-server", "--provider", "fake",
+        "--fake-script", script, "--db", join(tmp, "events.db")].join(" ");
+      const child = spawn(process.execPath, [join(cliDir, "dist", "main.js"), "-p", "/loop fix tests",
+        "--json", "--cwd", tmp, "--trust-project", "--permission-mode", "deny", "--server", serverCmd],
+      { stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+      child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+      const code = await new Promise<number | null>((done) => child.on("close", done));
+      expect(code, stderr).toBe(1);
+      const events: unknown[] = stdout.trim().split("\n").map((line) => JSON.parse(line));
+      expect(events).toContainEqual({ type: "turn_ended", stopReason: "end_turn", verification: "failed" });
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   }, 120_000);
 });

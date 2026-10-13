@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { Box, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { theme } from "./theme.js";
 import type {
   PermissionAnswer,
   PermissionRequest,
@@ -12,6 +13,7 @@ import { Transcript } from "./components/Transcript.js";
 import { PermissionPrompt } from "./components/PermissionPrompt.js";
 import { InputBox, type SlashCommandHint } from "./components/InputBox.js";
 import { StatusBar } from "./components/StatusBar.js";
+import { RequestProgress } from "./components/RequestProgress.js";
 import { Banner } from "./components/Banner.js";
 
 export interface AppProps {
@@ -35,10 +37,12 @@ interface PendingPermission {
 const EXIT_WINDOW_MS = 2000;
 
 export const SLASH_COMMANDS: SlashCommandHint[] = [
+  { name: "/memories", hint: "자동 메모리 상태·생성·참조 설정" },
+  { name: "/loop", hint: "<목표> 실행·검증·수정 반복" },
   { name: "/agent", hint: "<id> switch agent" },
   { name: "/model", hint: "<name> switch model" },
   { name: "/sessions", hint: "list saved sessions" },
-  { name: "/login", hint: "sign in (OAuth or API key)" },
+  { name: "/login", hint: "OpenAI·Claude 선택 후 로그인" },
   { name: "/logout", hint: "sign out" },
   { name: "/clear", hint: "clear the screen" },
   { name: "/help", hint: "show this help" },
@@ -63,12 +67,30 @@ function slashCommandsWithArgs(info: SessionInfo): SlashCommandHint[] {
   return SLASH_COMMANDS.map((c) => {
     if (c.name === "/agent") return { ...c, args: info.modes.map((m) => m.id) };
     if (c.name === "/model") return { ...c, args: info.models.map((m) => m.value) };
+    if (c.name === "/loop") return { ...c, args: ["status", "cancel", "resume"] };
     return c;
   });
 }
 
 /** `/login`, `/logout` 결과 알림. 재마운트된 App에서도 같은 문구를 쓰도록 공유한다. */
-export function authResultNotice(action: string, code: number): { text: string; error: boolean } {
+export function authResultNotice(
+  action: string,
+  code: number,
+  context?: { args: string[]; info: SessionInfo },
+): { text: string; error: boolean } {
+  if (action === "login" && code === 0 && context) {
+    const providerIndex = context.args.indexOf("--provider");
+    const provider = providerIndex >= 0 ? context.args[providerIndex + 1] : "anthropic";
+    const prefix = provider === "openai" ? "gpt-" : provider === "gemini" ? "gemini-" : "claude-";
+    const model = context.info.models.find((m) => m.provider === provider || (!m.provider &&
+      (provider === "openrouter" ? m.value.includes("/") : m.value.startsWith(prefix))));
+    const name = provider === "openai" ? "OpenAI" : provider === "gemini" ? "Gemini" : provider === "openrouter" ? "OpenRouter" : "Claude";
+    const command = model ? `/model ${model.value}` : "/model";
+    return {
+      text: `login succeeded\n로그인은 인증만 설정하며 대화 모델은 바꾸지 않습니다. 현재 모델: ${context.info.currentModel ?? "default"}\n${name} 모델을 사용하려면 ${command} 명령으로 전환하세요.`,
+      error: false,
+    };
+  }
   return code === 0
     ? { text: `${action} succeeded`, error: false }
     : { text: `${action} failed (exit code ${code})`, error: true };
@@ -84,6 +106,7 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
   const [state, dispatch] = useReducer(reduceUi, handle.info, initialState);
   const [permissions, setPermissions] = useState<PendingPermission[]>([]);
   const [expandAll, setExpandAll] = useState(false);
+  const [loginProvider, setLoginProvider] = useState<"openai" | "anthropic" | null>(null);
   const [exitArmedAt, setExitArmedAt] = useState<number | null>(null);
   const runningRef = useRef(false);
   runningRef.current = state.running;
@@ -129,6 +152,24 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
       const arg = rest.join(" ");
       const info = handle.info;
       switch (cmd) {
+        case "/memories":
+          if (runningRef.current) {
+            notice("작업이 끝난 뒤 메모리 설정을 변경하세요.", true);
+            return;
+          }
+          await handle.prompt(line);
+          return;
+        case "/loop": {
+          const control = !arg || arg === "status" || arg === "cancel";
+          if (runningRef.current && !control) {
+            notice("목표 루프가 실행 중입니다. /loop cancel로 중지하세요.", true);
+            return;
+          }
+          if (!control) dispatch({ type: "user_text", text: line });
+          await handle.prompt(line);
+          if (!control) dispatch({ type: "ui_idle" });
+          return;
+        }
         case "/agent": {
           if (!arg) {
             notice(`agents: ${info.modes.map((m) => (m.id === state.mode ? `*${m.id}` : m.id)).join(", ")}`);
@@ -184,6 +225,10 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
             notice("a turn is running; cancel it (Ctrl+C) before signing in", true);
             return;
           }
+          if (cmd === "/login" && rest.length === 0) {
+            setLoginProvider("openai");
+            return;
+          }
           // onRunAuth가 끝날 때까지 TUI는 화면에서 내려가고 ant/키 입력 프롬프트가 터미널을
           // 직접 쓴다. 의도된 동작이므로 "로그인 중" 같은 Ink 알림을 먼저 띄우지 않는다.
           // 반영 시점: Anthropic(ant 프로필)은 해당 모델로 아직 메시지를 보내지 않았다면 다음
@@ -193,7 +238,7 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
           // 읽고 다시 읽지 않으므로, 새로 저장한 키는 서버(perdix)를 재시작해야 적용된다.
           const action = cmd.slice(1);
           const code = await onRunAuth([action, ...rest]);
-          const result = authResultNotice(action, code);
+          const result = authResultNotice(action, code, { args: [action, ...rest], info: handle.info });
           notice(result.text, result.error);
           return;
         }
@@ -229,6 +274,7 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
         return;
       }
       dispatch({ type: "user_text", text });
+      dispatch({ type: "turn_started" });
       handle.prompt(text).then(
         () => dispatch({ type: "ui_idle" }),
         (err: unknown) => {
@@ -241,6 +287,17 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
   );
 
   useInput((input, key) => {
+    if (loginProvider !== null && !permissions[0]) {
+      if (key.escape || (key.ctrl && input === "c")) {
+        setLoginProvider(null);
+      } else if (key.tab || key.leftArrow || key.rightArrow) {
+        setLoginProvider((provider) => provider === "openai" ? "anthropic" : "openai");
+      } else if (key.return) {
+        setLoginProvider(null);
+        submit(`/login --provider ${loginProvider}`);
+      }
+      return;
+    }
     if (key.ctrl && input === "c") {
       if (state.running) {
         // 대기 중인 권한 요청은 취소로 응답하고 턴을 취소한다.
@@ -274,7 +331,18 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
       )}
       <Transcript done={state.done} live={state.live} expandAll={expandAll} />
       {pending && <PermissionPrompt key={pending.request.requestId} request={pending.request} onAnswer={answerPermission} />}
-      <InputBox active={!pending} onSubmit={submit} placeholder="Type a message or /help" commands={commandsWithArgs} />
+      {loginProvider !== null && !pending && (
+        <Box flexDirection="column" borderStyle="round" borderColor={theme.borderAccent} paddingX={1}>
+          <Text>로그인할 서비스를 선택하세요</Text>
+          <Box gap={2}>
+            <Text inverse={loginProvider === "openai"}> OpenAI </Text>
+            <Text inverse={loginProvider === "anthropic"}> Claude </Text>
+          </Box>
+          <Text dimColor>Tab / ← → 선택 · Enter 로그인 · Esc 취소</Text>
+        </Box>
+      )}
+      <RequestProgress state={state} permissionTitle={pending?.request.title} />
+      <InputBox active={!pending && loginProvider === null} onSubmit={submit} placeholder="Type a message or /help" commands={commandsWithArgs} />
       <StatusBar
         mode={state.mode}
         model={state.model}

@@ -16,7 +16,9 @@ export interface HeadlessOptions {
   resume?: string;
   /** 헤드리스 기본은 deny (protocol.md §1.3) */
   permissionMode?: string;
+  trustProject?: boolean;
   server?: string;
+  serverArgs?: string[];
   debug?: boolean;
   out?: NodeJS.WritableStream;
   err?: NodeJS.WritableStream;
@@ -68,8 +70,10 @@ export async function runHeadless(opts: HeadlessOptions): Promise<number> {
     connection = await startServerConnection({
       cwd: opts.cwd,
       server: opts.server,
+      serverArgs: opts.serverArgs,
       debug: opts.debug,
       permissionMode: opts.permissionMode ?? "deny",
+      trustProject: opts.trustProject,
     });
     if (opts.resume) {
       session = await connection.loadSession({ sessionId: opts.resume, cwd: opts.cwd });
@@ -92,7 +96,7 @@ export async function runHeadless(opts: HeadlessOptions): Promise<number> {
       }
     });
     const result = await session.prompt(opts.prompt);
-    return result.stopReason === "end_turn" ? 0 : 1;
+    return result.stopReason === "end_turn" && result.verification !== "failed" ? 0 : 1;
   } catch (e) {
     err.write(`perdix: ${e instanceof Error ? e.message : String(e)}\n`);
     return 1;

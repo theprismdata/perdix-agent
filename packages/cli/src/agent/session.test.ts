@@ -116,6 +116,15 @@ async function setup() {
 }
 
 describe("AgentSession", () => {
+  it("keeps turn lifecycle untouched when querying loop status", async () => {
+    const { connection } = await setup();
+    const session = await connection.newSession({ cwd: "/w" });
+    const events: AgentEvent[] = [];
+    session.onEvent((event) => events.push(event));
+    await session.prompt("/loop status");
+    expect(events.some((event) => event.type === "turn_started" || event.type === "turn_ended")).toBe(false);
+    await session.close();
+  });
   it("builds SessionInfo from session/new", async () => {
     const { connection } = await setup();
     const session = await connection.newSession({ cwd: "/w" });
@@ -251,5 +260,18 @@ describe("AgentSession", () => {
       { sessionId: SID, cwd: "/w", title: "t", updatedAt: "2026-01-01T00:00:00Z" },
     ]);
     await session.close();
+  });
+
+  it("delivers reload history to the replacement session when the id is already registered", async () => {
+    const { connection } = await setup();
+    const previous = await connection.newSession({ cwd: "/w" });
+    const oldEvents: AgentEvent[] = [];
+    previous.onEvent((event) => oldEvents.push(event));
+    const reloaded = await connection.loadSession({ sessionId: SID, cwd: "/w" });
+    const events: AgentEvent[] = [];
+    reloaded.onEvent((event) => events.push(event));
+    expect(events).toEqual([{ type: "user_text", text: "earlier" }]);
+    expect(oldEvents).toEqual([]);
+    await reloaded.close();
   });
 });

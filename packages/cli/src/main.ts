@@ -20,10 +20,13 @@ Options:
       --cwd <dir>            Working directory (default: current directory)
       --mode <id>            Session mode (chat | plan | build)
       --model <name>         Model id
+      --agents-config <path> Role model assignment file
       --resume <sessionId>   Resume a saved session
+      --tui <name>          default | hermes (Hermes TUI 평가판)
       --list                 List saved sessions for the working directory
       --permission-mode <m>  interactive | deny | accept-edits | allowlist (default with -p: deny)
       --server <cmd>         Server command (overrides PERDIX_SERVER)
+      --trust-project        Trust verification commands in the working directory
       --debug                Pass server stderr through instead of logging to ~/.perdix/logs
   -v, --version              Print version
   -h, --help                 Show this help
@@ -47,9 +50,12 @@ function parseCli(argv: string[]) {
       cwd: { type: "string" },
       mode: { type: "string" },
       model: { type: "string" },
+      "agents-config": { type: "string" },
       resume: { type: "string" },
+      tui: { type: "string", default: "default" },
       list: { type: "boolean", default: false },
       "permission-mode": { type: "string" },
+      "trust-project": { type: "boolean", default: false },
       server: { type: "string" },
       debug: { type: "boolean", default: false },
       version: { type: "boolean", short: "v", default: false },
@@ -129,6 +135,14 @@ async function main(): Promise<number> {
     process.stdout.write(USAGE);
     return 0;
   }
+  if (args.tui !== "default" && args.tui !== "hermes") {
+    process.stderr.write("perdix: --tui는 default 또는 hermes여야 합니다.\n");
+    return 2;
+  }
+  if (args.tui === "hermes" && !args.list && (args.prompt !== undefined || !process.stdin.isTTY)) {
+    process.stderr.write("perdix: Hermes 평가판은 대화형 터미널에서 실행하세요. -p와 함께 사용할 수 없습니다.\n");
+    return 2;
+  }
 
   const cwd = resolve(args.cwd ?? process.cwd());
   try {
@@ -140,7 +154,8 @@ async function main(): Promise<number> {
     process.stderr.write(`설정 파일 생성 실패 (${DEFAULT_CREDENTIALS_PATH}): ${err instanceof Error ? err.message : String(err)}\n`);
   }
   const permissionMode = args["permission-mode"];
-  const model = args.model ?? (args.resume ? undefined : readDefaultModel());
+  const serverArgs = args["agents-config"] ? ["--agents-config", resolve(args["agents-config"])] : [];
+  const model = args.model ?? (args.resume || args["agents-config"] ? undefined : readDefaultModel());
 
   if (args.prompt !== undefined) {
     return runHeadless({
@@ -151,7 +166,9 @@ async function main(): Promise<number> {
       model,
       resume: args.resume,
       permissionMode: permissionMode ?? "deny",
+      trustProject: args["trust-project"],
       server: args.server,
+      serverArgs,
       debug: args.debug,
     });
   }
@@ -162,8 +179,10 @@ async function main(): Promise<number> {
     connection = await startServerConnection({
       cwd,
       server: args.server,
+      serverArgs,
       debug: args.debug,
       permissionMode,
+      trustProject: args["trust-project"],
     });
 
     if (args.list) {
@@ -173,6 +192,30 @@ async function main(): Promise<number> {
         process.stdout.write(`${s.sessionId}  ${s.updatedAt ?? "-"}  ${s.title ?? ""}\n`);
       }
       return 0;
+    }
+
+    if (args.tui === "hermes") {
+      const [{ launchHermesTui }, { HermesAdapter }, { startHermesBridge }] = await Promise.all([
+        import("@perdix/hermes-tui"), import("./hermes/adapter.js"), import("./hermes/bridge.js"),
+      ]);
+      const { runHermesAuth } = await import("./hermes/auth.js");
+      const adapter = new HermesAdapter(connection, { cwd, mode: args.mode, model,
+        runAuth: (action, provider, signal) => runHermesAuth(action, provider, signal, args.server),
+        reconnect: async (signal) => {
+          const next = await startServerConnection({ cwd, server: args.server, serverArgs, debug: args.debug, permissionMode, trustProject: args["trust-project"] });
+          if (signal.aborted) { await next.close(); throw new Error("인증 후 연결을 취소했습니다."); }
+          const previous = connection;
+          connection = next;
+          await previous?.close();
+          return next;
+        },
+      });
+      const bridge = await startHermesBridge(adapter);
+      try {
+        return await launchHermesTui({ gatewayUrl: bridge.url, cwd, resume: args.resume, terminalHandoff: () => adapter.authenticating });
+      } finally {
+        await bridge.close();
+      }
     }
 
     session = args.resume

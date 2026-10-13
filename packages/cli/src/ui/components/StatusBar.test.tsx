@@ -2,8 +2,34 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "ink-testing-library";
 import { contextBar, contextBarColor, formatUsage, layoutStatusBar, StatusBar } from "./StatusBar.js";
 import { theme } from "../theme.js";
+import { initialState, reduce } from "../state.js";
+import { requestPhase, RequestProgress } from "./RequestProgress.js";
 
 afterEach(cleanup);
+
+describe("RequestProgress", () => {
+  const base = initialState({ sessionId: "s", currentMode: "chat", currentModel: "m" });
+  it("shows response wait, tool wait, execution, approval and the final receipt", () => {
+    expect(requestPhase(base)).toContain("읽기 전용");
+    const running = reduce(base, { type: "turn_started" });
+    expect(requestPhase(running)).toBe("모델 응답 기다리는 중");
+    const waiting = reduce(running, { type: "tool_call", toolCallId: "t", title: "read ls .", kind: "read", status: "pending" });
+    expect(requestPhase(waiting)).toContain("도구 호출 대기");
+    const executing = reduce(waiting, { type: "tool_call_update", toolCallId: "t", status: "in_progress" });
+    expect(requestPhase(executing)).toContain("도구 실행 중");
+    expect(requestPhase(executing, "git fetch")).toBe("승인 대기 · git fetch");
+    const ended = reduce(executing, { type: "turn_ended", stopReason: "cancelled" });
+    expect(requestPhase(ended)).toBe("요청이 취소됐습니다.");
+  });
+  it("renders the state independently from model and context statistics", () => {
+    const state = reduce(base, { type: "turn_started" });
+    const r = render(<RequestProgress state={state} />);
+    const frame = r.lastFrame() ?? "";
+    expect(frame).toContain("모델 응답 기다리는 중");
+    expect(frame).toContain("경과 0초");
+    expect(frame).toContain("Ctrl+C 취소");
+  });
+});
 
 describe("StatusBar", () => {
   it("shows mode, model, context percent and short session id", () => {

@@ -23,6 +23,8 @@ export function ensureCredentialsFile(path: string = DEFAULT_CREDENTIALS_PATH): 
   const defaults: CredentialsFile = {
     anthropic: { api_key: "" },
     openai: { api_key: "" },
+    gemini: { api_key: "" },
+    openrouter: { api_key: "" },
   };
   try {
     // 배타적 생성으로 동시 실행 중에도 기존 키를 덮어쓰지 않는다.

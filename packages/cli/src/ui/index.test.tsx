@@ -60,7 +60,9 @@ describe("renderApp", () => {
     expect(resolved).toBe(false);
     expect(mounts).toHaveLength(2);
     expect(mounts[1]?.props.handle).toBe(session);
-    expect(mounts[1]?.props.initialNotice).toEqual({ text: "login succeeded", error: false });
+    expect(mounts[1]?.props.initialNotice?.error).toBe(false);
+    expect(mounts[1]?.props.initialNotice?.text).toContain("현재 모델: fake-model");
+    expect(mounts[1]?.props.initialNotice?.text).toContain("OpenAI 모델을 사용하려면 /model");
 
     await expect(mounts[1]?.props.onRunAuth?.(["logout"])).resolves.toBe(3);
     expect(mounts).toHaveLength(3);

@@ -36,7 +36,7 @@ export function renderApp(handle: SessionHandle, opts: RenderAppOptions = {}): P
         // 이어 그려져 화면이 두 겹으로 겹친다. /clear와 같은 시퀀스로 지운다.
         process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
         code = await runAuth(args);
-        notice = authResultNotice(args[0] ?? "auth", code);
+        notice = authResultNotice(args[0] ?? "auth", code, { args, info: handle.info });
       } catch (err) {
         // runAuth 자체가 예외를 던지면(코드가 아니라 진짜 실패) 그 메시지를 보여준다.
         // 여기서 밖으로 다시 던지지 않는다 — 호출한 쪽(이미 언마운트된 옛 App)의
