@@ -17,6 +17,24 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 
 ## 사용법
 
+`websearch`는 별도 키 없이 웹 검색 결과의 제목·URL·요약을 반환하고,
+`webfetch`는 공개 페이지의 HTML 본문·링크 또는 텍스트를 읽는다. 모델이 일반 도구로
+선택하며 chat/plan/build와 읽기 전용 하위 에이전트에도 제공한다.
+기본 검색은 Bing RSS이며 검색 엔진의 차단·형식 변경은 도구 오류로 표시한다.
+JavaScript 렌더링·로그인·PDF는 지원하지 않는다. 내부 주소·비표준 포트는 차단하며
+30초·1MB 제한을 적용한다. `deny` 권한 모드에서는 웹 접근도 거부한다.
+
+프로젝트 규칙은 매 모델 호출마다 자동으로 읽는다. 전역 `~/.claude/CLAUDE.md`,
+상위 폴더부터 작업 폴더까지의 `AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`,
+`CLAUDE.local.md`를 합치며 가까운 폴더와 나중 파일을 우선한다. 메모리 참조를
+꺼도 규칙 로딩은 유지된다. 메인·하위 에이전트 모두 같은 로더를 사용한다.
+`CLAUDE.md`의 독립된 `@문서.md` 줄은 프로젝트 안의 Markdown을 임포트한다.
+임포트 순환·중복·크기를 제한하며 외부 경로와 코드 블록 안의 임포트는 제외한다.
+하위 폴더 규칙은 파일 도구의 `path`로 발견하고 다음 모델 호출에 적용한다.
+새 규칙을 보지 못한 상태의 쓰기는 확인 요청 결과를 반환하고 재시도한다.
+셸 명령 문자열의 경로는 추론하지 않으므로 하위 파일은 먼저 파일 도구로 조회해야 한다.
+규칙은 프롬프트 지침이며 읽기 전용 모드·신뢰 게이트·실행 권한을 완화하지 않는다.
+
 여러 단계가 필요한 요청에서는 작업 시작 설명, 주요 발견과 검증 결과를 대화 중에
 짧게 전달하도록 에이전트에 지시한다. 진행 설명은 일반 답변처럼 즉시 스트리밍되며,
 CLI와 VS Code 채팅에서 도구 실행 상태와 함께 볼 수 있다. 설명의 빈도는 모델에
@@ -43,7 +61,8 @@ CLI 입력창 위에서는 모델 응답 대기·도구 실행·승인 대기와
 프로그램, 키 파일, 기본 모델, 바탕화면·시작 메뉴 바로가기를 자동으로 설정한다.
 VS Code가 설치되어 있으면 Perdix Webview 확장도 함께 자동 설치한다.
 키 입력을 비우면 해당 공급자의 기존 저장 키를 사용한다. 첫 설치에는 키가 필요하다.
-설정은 사용자 홈의 `.perdix/credentials.json`과 `.perdix/preferences.json`에 저장한다.
+API 키는 사용자 홈의 `.perdix/credentials.json`에 저장한다. 모델은
+`.perdix/agents.json`의 역할별 할당을 사용하며 `--model`로 명시적으로 변경할 수 있다.
 제거 시 키와 세션 기록은 남긴다. 런타임 설치나 JSON 직접 편집은 필요 없다.
 
 Windows x64 개발 환경에서 Node.js 22 이상, pnpm 10.30.3, Bun, uv, Inno Setup 6을 준비한다.
@@ -57,7 +76,6 @@ pnpm build:windows
 빌드 결과는 `dist/Perdix-Setup-windows-x64.exe`다. 성공하면 중간 빌드 폴더는 휴지통으로 이동한다. 휴지통 기능을 지원하지 않는 환경에서는 경고와 함께 폴더를 남긴다. 빌드 실패 시에도 진단을 위해 남긴다.
 
 - `pnpm build:windows -CheckOnly`: 필요한 빌드 도구만 확인한다.
-- `pnpm build:windows -TestInstaller`: 별도 폴더에서 설치·키 설정·바로가기·재설치·제거까지 검증한다. 실제 사용자 설정은 건드리지 않는다.
 - `pnpm build:windows -KeepBuildFiles`: 중간 빌드 폴더를 보관한다.
 - `pnpm build:windows -InnoCompiler "C:\경로\ISCC.exe"`: Inno Setup 컴파일러 위치를 지정한다.
 
@@ -294,17 +312,17 @@ API 키를 환경변수로 지정할 때는 `$env:ANTHROPIC_API_KEY = '키'` 형
 (cd server && uv run python scripts/chat.py)                       # TUI 없이 텍스트로 대화
 ```
 
-### 테스트와 빌드
+### 빌드와 정적 검사
 
 ```bash
-pnpm -r build && pnpm -r test # TS
-(cd server && uv run pytest)  # Python
+pnpm -r build && pnpm -r lint && pnpm -r typecheck
+(cd server && uv run ruff check . && uv run mypy src)
 ```
 
 ```bash
 scripts/bootstrap.sh          # pnpm install + (cd server && uv sync)
-pnpm -r build && pnpm -r test # TS
-(cd server && uv run pytest)  # Python
+pnpm -r build && pnpm -r lint && pnpm -r typecheck
+(cd server && uv run ruff check . && uv run mypy src)
 ```
 
 uv 없이 pip만 쓰는 경우(서버):
@@ -323,6 +341,27 @@ cd server
 uv export --format requirements-txt --no-hashes --no-dev --no-emit-project -o requirements.txt
 uv export --format requirements-txt --no-hashes --no-emit-project -o requirements-dev.txt
 ```
+
+### OpenRouter 모델 메뉴
+
+Hermes TUI에서 `/assign`을 실행하면 OpenRouter 목록을 조회한 뒤 에이전트를
+고르고 모델 ID를 입력 검색해 Enter로 할당할 수 있다. Esc로 이전 단계·취소한다.
+목록은 텍스트 출력과 도구 호출을 지원하는 모델에 한정한다. 저장은 서버가
+`~/.perdix/agents.json` 또는 `--agents-config` 지정 파일에 수행한다. 다른 역할과
+기존 effort는 보존하고 모델의 한도·가격 메타데이터도 저장한다. 현재 역할이면
+현재 세션에도 적용되며 다른 역할은 다음 실행부터 사용한다. 조회·저장은 실행 중
+거절되며 목록 오류 시 설정을 바꾸지 않는다. 실제 호출에는 OpenRouter 키가 필요하다.
+
+### 자동 컨텍스트 압축
+
+모델 호출 전 입력 추정치와 출력 예약량이 컨텍스트 창의 75%에 도달하면 완료된
+오래된 기록을 자동 요약한다. `~/.perdix/agents.json`의 `compactor` 모델·effort
+할당을 사용하며, 현재 사용자 요청과 마지막 assistant·도구 결과는 보존한다.
+원본 event log는 유지하고 `compaction` 이벤트를 추가해 다음 요청의 투영만 바꾼다.
+추정치는 UTF-8 크기와 직전 공급자 사용량을 참고하므로 실제 토큰 수와 차이가 있다.
+요약 호출은 45초·최대 8회로 제한하며 공용 실행 예산을 소비한다. 요약 실패 시
+오래된 도구 결과를 줄이고, 그래도 한도를 넘으면 명확한 오류로 요청을 중단한다.
+세부 정책은 [ADR 0022](docs/adr/0022-automatic-compaction.md)를 참고한다.
 
 ### Telegram · GitHub · 웹 대시보드
 

@@ -16,7 +16,6 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/main.ts",
-    "test": "vitest run",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

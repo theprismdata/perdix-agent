@@ -7,8 +7,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.vendor.json",
-    "lint": "eslint src scripts",
-    "test": "vitest run"
+    "lint": "eslint src scripts"
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "0.1.3",

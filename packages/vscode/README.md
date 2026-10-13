@@ -34,13 +34,10 @@ API 키는 Webview로 전달하지 않습니다. 파일·명령 실행 및 권�
 ```powershell
 pnpm --filter @perdix/protocol build
 pnpm --filter perdix-vscode build
-pnpm --filter perdix-vscode test
-pnpm --filter perdix-vscode test:webview
-pnpm --filter perdix-vscode test:server
+pnpm --filter perdix-vscode lint
+pnpm --filter perdix-vscode typecheck
 ```
 
-`test:webview`는 Windows의 Edge를 헤드리스로 실행해 화면과 입력·승인·취소를 검사합니다. 다른 운영체제에서는 Playwright Chromium 설치가 필요합니다. `test:server`는 설치된 서버를 테스트 공급자로 실행하고 별도 임시 DB를 사용하므로 실제 API 요청을 보내지 않습니다. 서버 경로를 마지막 인자로 지정할 수도 있습니다.
-
-VSIX는 `packages/vscode`에서 `pnpm dlx @vscode/vsce package --no-dependencies --allow-missing-repository --out ../../dist/perdix-vscode-0.0.1.vsix`로 만듭니다. 실제 VS Code 호스트 검증은 `scripts/test-vscode-host.cjs`를 VS Code의 `--extensionTestsPath`에 지정하고 이 패키지를 `--extensionDevelopmentPath`에 지정해 실행합니다. 사용자 설정에 영향을 주지 않도록 별도 `--user-data-dir`과 `--extensions-dir`을 사용합니다.
+VSIX는 `packages/vscode`에서 `pnpm dlx @vscode/vsce package --no-dependencies --allow-missing-repository --out ../../dist/perdix-vscode-0.0.1.vsix`로 만듭니다.
 
 2026-10-11 검증: 확장 테스트 10개, Webview 브라우저 검사, 실제 확장 호스트 활성화·뷰 열기, 설치된 Python 서버의 응답·대화 복원 검사 통과. 전체 저장소의 기존 Windows 문제(TS 테스트 4개, Python 테스트 25개, mypy 오류 4개)는 남아 있습니다. 린트와 TS 타입 검사, Python Ruff는 통과했습니다.

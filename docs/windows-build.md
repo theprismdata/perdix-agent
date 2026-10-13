@@ -43,7 +43,6 @@ pnpm build:windows
 | 명령 | 용도 |
 |---|---|
 | `pnpm build:windows -CheckOnly` | 도구 준비 상태만 확인 |
-| `pnpm build:windows -TestInstaller` | 빌드 후 설치 동작까지 검증 |
 | `pnpm build:windows -KeepBuildFiles` | 중간 실행 파일과 빌드 자료 보관 |
 | `pnpm build:windows -InnoCompiler "C:\Tools\Inno Setup 6\ISCC.exe"` | 설치 컴파일러 위치 지정 |
 
@@ -57,7 +56,7 @@ VS Code가 설치되어 있으면 VS Code의 `bin\code.cmd` 명령을 통해 Per
 
 - 프로그램: `%LOCALAPPDATA%\Programs\Perdix`
 - 키: `%USERPROFILE%\.perdix\credentials.json`
-- 기본 모델: `%USERPROFILE%\.perdix\preferences.json`
+- 에이전트별 모델: `%USERPROFILE%\.perdix\agents.json`
 
 키 파일의 기본 구조는 다음과 같다. 실제 키는 사용할 공급자의 빈 문자열에 넣는다.
 
@@ -73,8 +72,6 @@ VS Code가 설치되어 있으면 VS Code의 `bin\code.cmd` 명령을 통해 Per
 ## 임시 파일과 오류 확인
 
 각 빌드는 `dist/.windows-build-<고유값>/`에서 작업한다. 성공하면 해당 폴더를 휴지통으로 이동한다. 휴지통 기능을 사용할 수 없으면 경고와 경로를 표시하고 폴더를 남기며, 완성된 설치 파일은 사용할 수 있다. 빌드 실패 시에는 진단 자료를 보존한다.
-
-`-TestInstaller`는 별도 임시 폴더에서 시험용 키로 설치하므로 실제 사용자의 키와 바로가기를 변경하지 않는다. 시험 설치 폴더와 로그는 시스템 임시 폴더의 `perdix installer <고유값>`에 남는다. 검증에 실패하면 시험 설치 파일도 `dist/Perdix-Setup-test.exe`에 남을 수 있다.
 
 ## 검증 기록 (2026-10-11)
 

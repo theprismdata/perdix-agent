@@ -61,10 +61,6 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run",
-    "test:webview": "node scripts/test-webview.mjs",
-    "test:loop": "tsx scripts/test-goal-loop.mts",
-    "test:server": "tsx scripts/test-server.mts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },

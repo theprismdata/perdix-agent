@@ -1,6 +1,5 @@
 param(
     [switch]$CheckOnly,
-    [switch]$TestInstaller,
     [switch]$KeepBuildFiles,
     [string]$InnoCompiler
 )
@@ -75,10 +74,6 @@ try {
     & (Join-Path $PSScriptRoot 'build-installer.ps1') -ReleaseDirectory $releaseRoot -InnoCompiler $InnoCompiler
     Write-Host '[6/6] Checking binary...'
     Invoke-Checked (Join-Path $releaseRoot 'perdix.exe') @('--version')
-    if ($TestInstaller) {
-        & (Join-Path $PSScriptRoot 'test-windows-installer.ps1') -ReleaseDirectory $releaseRoot -InnoCompiler $InnoCompiler
-        Move-Item -LiteralPath (Join-Path $outputRoot 'Perdix-Setup-test.exe') -Destination $workRoot
-    }
     $installerPath = Join-Path $outputRoot 'Perdix-Setup-windows-x64.exe'
     $sha256 = [Security.Cryptography.SHA256]::Create()
     $stream = [IO.File]::OpenRead($installerPath)

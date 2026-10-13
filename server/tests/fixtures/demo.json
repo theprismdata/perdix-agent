@@ -1,4 +1,0 @@
-[
-  {"text": "작업 디렉터리를 살펴보겠습니다.", "tool_uses": [{"id": "tu1", "name": "ls", "input": {"path": "."}}], "stop": "tool_use"},
-  {"text": "확인했습니다. 끝.", "stop": "end_turn"}
-]

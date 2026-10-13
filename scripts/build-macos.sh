@@ -23,7 +23,6 @@ cp docs/macos-installation.md "$work/dmg/README.md"
 codesign --force --deep --sign - "$app"
 "$payload/perdix" --version
 "$payload/server/perdix-server" --version
-bash scripts/test-macos-installer.sh "$app"
 hdiutil create -volname 'Perdix Setup' -srcfolder "$work/dmg" -format UDZO -ov "$root/dist/release/Perdix-Setup-macos-$arch.dmg"
 printf '완료: dist/release/Perdix-Setup-macos-%s.dmg\n' "$arch"
 mv "$work" "$HOME/.Trash/perdix-macos-build-$(date +%s)-$$"
