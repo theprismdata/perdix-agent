@@ -1242,7 +1242,8 @@ export function useMainApp(gw: GatewayClient) {
 
   const onModelSelect = useCallback((value: string) => {
     patchOverlayState({ modelPicker: false })
-    slashRef.current(`/model ${value}`, false) // the typed /model that opened the picker already counted
+    slashRef.current(value.startsWith('--assign ')
+      ? `/assign ${value.slice('--assign '.length)}` : `/model ${value}`, false)
   }, [])
 
   const closeLiveSession = useCallback(

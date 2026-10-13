@@ -13,6 +13,7 @@ const COMMANDS = [
   ["/help", "연결된 명령 안내"], ["/new", "새 대화"], ["/clear", "새 대화로 전환"],
   ["/sessions", "저장된 대화 선택"], ["/resume", "저장된 대화 복원"],
   ["/model", "모델 선택"], ["/agent", "Perdix 모드 조회·변경"], ["/mode", "chat | plan | build"],
+  ["/assign", "OpenRouter 모델을 에이전트에 할당"],
   ["/status", "현재 세션 상태"], ["/usage", "서버가 보고한 컨텍스트 사용량"],
   ["/cancel", "진행 중 작업 취소"], ["/stop", "진행 중 작업 취소"],
   ["/save", "자동 저장과 복원 안내"], ["/loop", "Perdix 목표 루프"],
@@ -380,7 +381,12 @@ export class HermesAdapter {
       case "model.options": {
         const id = typeof params.session_id === "string" ? params.session_id : this.current;
         const session = id ? this.session(id) : null;
-        const models = session?.handle.info.models ?? [];
+        if (params.refresh === true) {
+          if (!session?.handle.setConfigOption) throw new HermesRpcError(-32601, "모델 목록 조회를 지원하지 않습니다.");
+          await session.handle.setConfigOption("openrouter_catalog", "refresh");
+        }
+        const models = (params.assign === true
+          ? session?.handle.info.assignmentModels : session?.handle.info.models) ?? [];
         const currentModel = session?.handle.info.currentModel ?? "";
         const currentProvider = models.find(model => model.value === currentModel)?.provider ?? "unknown";
         const providers = [...new Set(models.map(model => model.provider ?? "unknown"))].map(slug => {
@@ -416,6 +422,15 @@ export class HermesAdapter {
           await session.handle.setMode(args.join(" "));
           this.publish(id, "session.info", this.info(session));
           return { output: `모드 변경: ${session.handle.info.currentMode}` };
+        }
+        if (name === "assign") {
+          if (session.busy) throw new HermesRpcError(-32602, "작업 종료 후 설정하세요.");
+          if (args.length !== 2 || !session.handle.setConfigOption) {
+            throw new HermesRpcError(-32602, "/assign 메뉴에서 에이전트와 모델을 선택하세요.");
+          }
+          await session.handle.setConfigOption(`agent_model_${args[0]}`, args[1] ?? "");
+          this.publish(id, "session.info", this.info(session));
+          return { output: `${args[0]} 에이전트에 OpenRouter ${args[1]} 모델을 할당하고 agents.json에 저장했습니다.` };
         }
         if (name === "model") {
           if (args.length === 0) return { output: `현재 모델: ${session.handle.info.currentModel}\n${session.handle.info.models.map((model) => model.value).join("\n")}` };

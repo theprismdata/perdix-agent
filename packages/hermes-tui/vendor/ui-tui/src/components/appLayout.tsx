@@ -543,6 +543,8 @@ const StatusRulePane = memo(function StatusRulePane({
         lastTurnEndedAt={status.lastTurnEndedAt}
         liveSessionCount={ui.liveSessionCount}
         model={ui.info?.model ?? ''}
+        agentLabel={process.env.HERMES_TUI_PERDIX === '1' && ui.info?.personality
+          ? `에이전트: ${ui.info.personality}` : undefined}
         modelFast={ui.info?.fast}
         modelReasoningEffort={ui.info?.reasoning_effort}
         modelReasoningEffortWire={ui.info?.reasoning_effort_wire}

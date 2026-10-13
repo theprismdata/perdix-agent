@@ -26,6 +26,7 @@ export interface SessionInfo {
   modes: ModeInfo[];
   currentModel: string | null;
   models: ModelOption[];
+  assignmentModels?: ModelOption[];
 }
 
 export interface DiffContent {
@@ -93,6 +94,7 @@ export interface SessionHandle {
   cancel(): Promise<void>;
   setMode(modeId: string): Promise<void>;
   setModel(model: string): Promise<void>;
+  setConfigOption?(configId: string, value: string): Promise<void>;
   /** 이벤트 구독. 반환값은 해제 함수. */
   onEvent(listener: (event: AgentEvent) => void): () => void;
   /** 권한 요청 핸들러 등록. 하나만 등록되며, 없으면 reject_once로 응답한다. */

@@ -21,7 +21,10 @@ const VISIBLE = 12
 const MIN_WIDTH = 40
 const MAX_WIDTH = 90
 
-type Stage = 'provider' | 'key' | 'model' | 'reasoning' | 'disconnect'
+type Stage = 'agent' | 'provider' | 'key' | 'model' | 'reasoning' | 'disconnect'
+
+const AGENT_ROLES = ['chat', 'plan', 'build', 'explore', 'executor', 'reviewer', 'debugger',
+  'security-reviewer', 'compactor', 'titler'] as const
 
 type ProviderRow = { name: string; provider: ModelOptionProvider }
 
@@ -71,6 +74,7 @@ export function providerIndexAfterClearingFilter(
 }
 
 export function ModelPicker({
+  assign = false,
   allowPersistGlobal = featureEnabled('globalModel'),
   gw,
   initialRefresh = false,
@@ -87,10 +91,11 @@ export function ModelPicker({
   const [persistGlobal, setPersistGlobal] = useState(false)
   const [providerIdx, setProviderIdx] = useState(0)
   const [modelIdx, setModelIdx] = useState(0)
+  const [agentIdx, setAgentIdx] = useState(0)
   const [reasoningIdx, setReasoningIdx] = useState(0)
   // Model chosen on step 2, awaiting the effort pick on step 3.
   const [pendingModel, setPendingModel] = useState('')
-  const [stage, setStage] = useState<Stage>('provider')
+  const [stage, setStage] = useState<Stage>(assign ? 'agent' : 'provider')
   const [keyInput, setKeyInput] = useState('')
   const [keySaving, setKeySaving] = useState(false)
   const [keyError, setKeyError] = useState('')
@@ -117,6 +122,7 @@ export function ModelPicker({
 
   useEffect(() => {
     gw.request<ModelOptionsResult>('model.options', {
+      ...(assign ? { assign: true } : {}),
       ...(sessionId ? { session_id: sessionId } : {}),
       ...(initialRefresh ? { refresh: true } : {}),
       // The TUI picker shows the full provider universe with setup
@@ -135,7 +141,7 @@ export function ModelPicker({
           return
         }
 
-        const next = r.providers ?? []
+        const next = (r.providers ?? []).filter(p => !assign || p.slug === 'openrouter')
         setProviders(next)
         setCurrentModel(String(r.model ?? ''))
         setProviderIdx(
@@ -145,7 +151,7 @@ export function ModelPicker({
           )
         )
         setModelIdx(0)
-        setStage('provider')
+        setStage(assign ? 'agent' : 'provider')
         setErr('')
         setLoading(false)
       })
@@ -153,7 +159,7 @@ export function ModelPicker({
         setErr(rpcErrorMessage(e))
         setLoading(false)
       })
-  }, [gw, initialRefresh, sessionId])
+  }, [gw, initialRefresh, sessionId, assign])
 
   const names = useMemo(() => providerDisplayNames(providers), [providers])
 
@@ -235,7 +241,7 @@ export function ModelPicker({
     }
 
     if (stage === 'model' || stage === 'key' || stage === 'disconnect') {
-      setStage('provider')
+      setStage(assign ? 'agent' : 'provider')
       setModelIdx(0)
       setKeyInput('')
       setKeyError('')
@@ -254,6 +260,13 @@ export function ModelPicker({
   useOverlayKeys({ disabled: listStage, onBack: back, onClose: onCancel })
 
   useInput((ch, key) => {
+    if (assign && stage === 'agent') {
+      if (key.escape) onCancel()
+      else if (key.upArrow) setAgentIdx(v => Math.max(0, v - 1))
+      else if (key.downArrow) setAgentIdx(v => Math.min(AGENT_ROLES.length - 1, v + 1))
+      else if (key.return && !loading && !err) { setStage('model'); setFilter('') }
+      return
+    }
     // Key entry stage handles its own input
     if (stage === 'key') {
       if (keySaving) {
@@ -488,6 +501,10 @@ export function ModelPicker({
       const model = models[modelIdx]
 
       if (provider && model) {
+        if (assign) {
+          onSelect(`--assign ${AGENT_ROLES[agentIdx]} ${model}`)
+          return
+        }
         if (pickerOffersReasoning(provider, model)) {
           // Step 3/3: effort for the picked model (skipped on reasoning-free routes).
           setPendingModel(model)
@@ -573,6 +590,16 @@ export function ModelPicker({
   }
 
   // ── Key entry stage ──────────────────────────────────────────────────
+  if (assign && stage === 'agent') {
+    return <Box flexDirection="column" width={width}>
+      <Text color={t.color.accent}>OpenRouter 모델을 할당할 에이전트 선택</Text>
+      {AGENT_ROLES.map((role, index) => <Text key={role}
+        color={index === agentIdx ? t.color.accent : t.color.muted}>
+        {index === agentIdx ? '❯ ' : '  '}{role}
+      </Text>)}
+      <OverlayHint t={t}>↑↓ 선택 · Enter 모델 목록 · Esc 취소</OverlayHint>
+    </Box>
+  }
   if (stage === 'key' && provider) {
     const masked = keyInput ? '•'.repeat(Math.min(keyInput.length, 40)) : ''
 
@@ -782,7 +809,7 @@ export function ModelPicker({
   return (
     <Box flexDirection="column" width={width}>
       <Text bold color={t.color.accent} wrap="truncate-end">
-        {M.modelStage.title}
+        {assign ? `${AGENT_ROLES[agentIdx]} · OpenRouter 모델 선택` : M.modelStage.title}
       </Text>
 
       <Text color={t.color.muted} wrap="truncate-end">
@@ -834,7 +861,7 @@ export function ModelPicker({
       </Text>
 
       <Text color={t.color.muted} wrap="truncate-end">
-        {persistLine}
+        {assign ? 'agents.json에 역할별 모델 저장 · 기존 effort 유지' : persistLine}
       </Text>
       <OverlayHint t={t}>{models.length ? M.modelStage.hint : M.modelStage.emptyHint}</OverlayHint>
     </Box>
@@ -842,6 +869,7 @@ export function ModelPicker({
 }
 
 interface ModelPickerProps {
+  assign?: boolean
   allowPersistGlobal?: boolean
   gw: GatewayClient
   initialRefresh?: boolean

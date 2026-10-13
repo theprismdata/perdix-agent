@@ -83,6 +83,21 @@ const reasoningConfigPayload = (arg: string, sid: string) => {
 
 export const sessionCommands: SlashCommand[] = [
   {
+    help: 'OpenRouter 모델을 에이전트에 할당',
+    name: 'assign',
+    run: (arg, ctx) => {
+      if (ctx.ui.busy) return ctx.transcript.sys('작업이 끝난 뒤 모델을 할당하세요.')
+      if (arg.trim()) {
+        ctx.gateway.rpc<SlashExecResponse>('slash.exec', {
+          session_id: ctx.sid, command: `/assign ${arg.trim()}`,
+        }).then(ctx.guarded<SlashExecResponse>(r => ctx.transcript.sys(r.output || '할당 완료')),
+          ctx.guardedErr)
+        return
+      }
+      return patchOverlayState({ modelPicker: { refresh: true, assign: true } })
+    }
+  },
+  {
     aliases: ['background'],
     help: 'launch a background prompt',
     name: 'bg',

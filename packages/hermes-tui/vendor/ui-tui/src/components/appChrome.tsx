@@ -541,6 +541,7 @@ export function StatusRule({
   statusBarFields = null,
   statusColor,
   model,
+  agentLabel,
   modelFast,
   modelReasoningEffort,
   modelReasoningEffortWire,
@@ -563,6 +564,7 @@ export function StatusRule({
   const contextMark = usage.context_estimated ? '~' : ''
   const barColor = ctxBarColor(pct, t)
   const segs = statusBarSegments(cols)
+  const effectiveIndicatorStyle = agentLabel && cols < 80 ? 'unicode' : indicatorStyle
 
   // display.status_bar.fields visibility gate (same key + names as the
   // classic CLI bar). null = user hasn't customized → everything shows.
@@ -582,7 +584,8 @@ export function StatusRule({
       : ''
 
   const bar = !segs.compactCtx && usage.context_max && ok('context_pct') ? ctxBar(pct) : ''
-  const modelText = modelLabel(model, modelReasoningEffort, modelFast, modelReasoningEffortWire)
+  const modelText = [agentLabel, modelLabel(model, modelReasoningEffort, modelFast, modelReasoningEffortWire)]
+    .filter(Boolean).join(' | ')
 
   // Battery read-out — the first (pinned) status-bar element when enabled.
   const showBattery = !!battery && battery.available && battery.percent != null && ok('battery')
@@ -608,7 +611,7 @@ export function StatusRule({
   // (kaomoji is wide + verb; unicode is a bare 1-col spinner). When a notice
   // occupies the slot it reserves only `noticeReserve` (it shrinks/truncates).
   const slotWidth = busy
-    ? busyIndicatorWidth(indicatorStyle, turnStartedAt != null)
+    ? busyIndicatorWidth(effectiveIndicatorStyle, turnStartedAt != null)
     : showNotice
       ? noticeReserve
       : stringWidth(status)
@@ -738,7 +741,7 @@ export function StatusRule({
             <FaceTicker
               color={statusColor}
               startedAt={turnStartedAt}
-              style={indicatorStyle}
+              style={effectiveIndicatorStyle}
               verbOverride={compacting ? T.status.compacting : undefined}
             />
           ) : showNotice ? null : (
@@ -1014,6 +1017,7 @@ interface StatusRuleProps {
   turnStartedAt?: null | number
   usage: Usage
   voiceLabel?: string
+  agentLabel?: string
   onSessionCountClick?: () => void
 }
 

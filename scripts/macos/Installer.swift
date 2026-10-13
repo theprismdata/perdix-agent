@@ -14,7 +14,6 @@ struct InstallOptions {
     let home: URL
     let provider: String
     let key: String
-    let model: String
     let integrations: Bool
 }
 
@@ -51,29 +50,24 @@ func replaceLink(_ name: String, target: URL, directory: URL) throws {
 func install(_ options: InstallOptions) throws -> URL {
     let fm = FileManager.default
     guard ["anthropic", "openai"].contains(options.provider),
-          !options.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           !options.key.contains(where: { $0.isWhitespace }) else { throw InstallError.invalidSettings }
     guard fm.isExecutableFile(atPath: options.payload.appendingPathComponent("perdix").path),
           fm.isExecutableFile(atPath: options.payload.appendingPathComponent("server/perdix-server").path) else {
         throw InstallError.missingPayload
     }
     let credentialsURL = options.config.appendingPathComponent("credentials.json")
-    let preferencesURL = options.config.appendingPathComponent("preferences.json")
     var credentials = try readSettings(credentialsURL)
-    var preferences = try readSettings(preferencesURL)
     if !options.key.isEmpty {
         var entry = credentials[options.provider] as? [String: Any] ?? [:]
         entry["api_key"] = options.key
         credentials[options.provider] = entry
     }
-    preferences["default_model"] = options.model
     try fm.createDirectory(at: options.destination, withIntermediateDirectories: true)
     let version = options.destination.appendingPathComponent("versions/" + UUID().uuidString)
     try fm.createDirectory(at: version.deletingLastPathComponent(), withIntermediateDirectories: true)
     try fm.copyItem(at: options.payload, to: version)
     try fm.createDirectory(at: options.config, withIntermediateDirectories: true)
     if !options.key.isEmpty { try saveSettings(credentials, to: credentialsURL) }
-    try saveSettings(preferences, to: preferencesURL)
     let bin = options.home.appendingPathComponent(".local/bin")
     try fm.createDirectory(at: bin, withIntermediateDirectories: true)
     try replaceLink("perdix", target: version.appendingPathComponent("perdix"), directory: bin)
@@ -110,17 +104,17 @@ func install(_ options: InstallOptions) throws -> URL {
 
 func headlessInstall() throws {
     let args = Array(CommandLine.arguments.dropFirst())
-    guard args.count == 7, args[0] == "--test-install" else { throw InstallError.invalidArguments }
+    guard args.count == 6, args[0] == "--test-install" else { throw InstallError.invalidArguments }
     let key = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     let installed = try install(InstallOptions(
         payload: URL(fileURLWithPath: args[1]), destination: URL(fileURLWithPath: args[2]),
         config: URL(fileURLWithPath: args[3]), home: URL(fileURLWithPath: args[4]),
-        provider: args[5], key: key, model: args[6], integrations: false
+        provider: args[5], key: key, integrations: false
     ))
     print(installed.path)
 }
 
-func installerAlert() -> (NSAlert, NSPopUpButton, NSSecureTextField, NSTextField) {
+func installerAlert() -> (NSAlert, NSPopUpButton, NSSecureTextField) {
     let alert = NSAlert()
     alert.messageText = "Perdix 설치"
     alert.informativeText = "CLI·서버와 VS Code 확장을 설치합니다. API 키는 비워 두면 기존 키나 환경변수를 사용합니다."
@@ -130,21 +124,17 @@ func installerAlert() -> (NSAlert, NSPopUpButton, NSSecureTextField, NSTextField
     let provider = NSPopUpButton(frame: NSRect(x: 120, y: 105, width: 280, height: 26))
     provider.addItems(withTitles: ["Anthropic", "OpenAI"])
     let key = NSSecureTextField(frame: NSRect(x: 120, y: 62, width: 280, height: 26))
-    let model = NSTextField(frame: NSRect(x: 120, y: 19, width: 280, height: 26))
     provider.setAccessibilityLabel("공급자")
     key.setAccessibilityLabel("API 키")
-    model.setAccessibilityLabel("모델 ID")
     provider.nextKeyView = key
-    key.nextKeyView = model
-    model.placeholderString = "비워 두면 공급자 기본 모델"
-    for (text, y) in [("공급자", 110.0), ("API 키", 67.0), ("모델 ID", 24.0)] {
+    for (text, y) in [("공급자", 110.0), ("API 키", 67.0)] {
         let label = NSTextField(labelWithString: text)
         label.frame = NSRect(x: 0, y: y, width: 110, height: 20)
         view.addSubview(label)
     }
-    for field in [provider, key, model] as [NSView] { view.addSubview(field) }
+    for field in [provider, key] as [NSView] { view.addSubview(field) }
     alert.accessoryView = view
-    return (alert, provider, key, model)
+    return (alert, provider, key)
 }
 
 func showInstaller() throws {
@@ -152,19 +142,17 @@ func showInstaller() throws {
     app.setActivationPolicy(.regular)
     app.finishLaunching()
     app.activate(ignoringOtherApps: true)
-    let (alert, provider, key, model) = installerAlert()
+    let (alert, provider, key) = installerAlert()
     if alert.runModal() != .alertFirstButtonReturn { return }
     guard let resources = Bundle.main.resourceURL else { throw InstallError.missingPayload }
     let home = FileManager.default.homeDirectoryForCurrentUser
     let name = provider.indexOfSelectedItem == 0 ? "anthropic" : "openai"
-    let defaultModel = name == "anthropic" ? "claude-opus-5-5" : "gpt-6.1-sol"
-    let selectedModel = model.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
     _ = try install(InstallOptions(
         payload: resources.appendingPathComponent("payload"),
         destination: home.appendingPathComponent("Library/Application Support/Perdix"),
         config: home.appendingPathComponent(".perdix"), home: home, provider: name,
         key: key.stringValue.trimmingCharacters(in: .whitespacesAndNewlines),
-        model: selectedModel.isEmpty ? defaultModel : selectedModel, integrations: true
+        integrations: true
     ))
     let done = NSAlert()
     done.messageText = "설치 완료"

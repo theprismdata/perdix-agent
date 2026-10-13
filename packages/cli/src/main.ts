@@ -6,7 +6,6 @@ import { runAuthCommand } from "./agent/auth.js";
 import { startServerConnection, type PerdixConnection } from "./agent/connection.js";
 import { DEFAULT_CREDENTIALS_PATH, ensureCredentialsFile } from "./agent/credentials.js";
 import { formatEventText, runHeadless } from "./agent/headless.js";
-import { readDefaultModel } from "./agent/preferences.js";
 import type { AgentSession } from "./agent/session.js";
 import type { SessionHandle, SessionListItem } from "./agent/types.js";
 import { checkNodeVersion, VERSION } from "./version.js";
@@ -155,7 +154,7 @@ async function main(): Promise<number> {
   }
   const permissionMode = args["permission-mode"];
   const serverArgs = args["agents-config"] ? ["--agents-config", resolve(args["agents-config"])] : [];
-  const model = args.model ?? (args.resume || args["agents-config"] ? undefined : readDefaultModel());
+  const model = args.model;
 
   if (args.prompt !== undefined) {
     return runHeadless({

@@ -4,14 +4,12 @@ import { ChatController, chatMessage } from "./chat-controller.js";
 import { openExtensionConnection } from "./server-connection.js";
 import { chatHtml } from "./webview.js";
 import { DEFAULT_CREDENTIALS_PATH, ensureCredentialsFile } from "../../cli/src/agent/credentials.js";
-import { readDefaultModel } from "../../cli/src/agent/preferences.js";
 
 class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
   private view?: vscode.WebviewView;
   private readonly controller: ChatController;
 
   constructor(private readonly context: vscode.ExtensionContext) {
-    const defaultModel = readDefaultModel();
     const initialCwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "작업 폴더를 열어 주세요";
     this.controller = new ChatController({
       initialInfo: {
@@ -19,8 +17,8 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
         cwd: initialCwd,
         currentMode: "chat",
         modes: [{ id: "chat", name: "기본 에이전트 · Chat" }],
-        currentModel: defaultModel ?? null,
-        models: defaultModel ? [{ value: defaultModel, name: defaultModel }] : [],
+        currentModel: null,
+        models: [],
       },
       post: (message) => { void this.view?.webview.postMessage(message); },
       connect: async (sessionId) => {
@@ -29,7 +27,7 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
         try {
           return sessionId
             ? await connection.loadSession({ cwd, sessionId })
-            : await connection.newSession({ cwd, model: defaultModel, mode: "chat" });
+            : await connection.newSession({ cwd, mode: "chat" });
         } catch (error) { await connection.close(); throw error; }
       },
     });

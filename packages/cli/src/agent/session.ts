@@ -269,14 +269,24 @@ export class AgentSession implements SessionHandle {
   }
 
   async setModel(model: string): Promise<void> {
+    await this.setConfigOption(MODEL_CONFIG_ID, model);
+  }
+
+  async setConfigOption(configId: string, value: string): Promise<void> {
     const res = await this.agent.request("session/set_config_option", {
       sessionId: this.sessionId,
-      configId: MODEL_CONFIG_ID,
-      value: model,
+      configId,
+      value,
     });
     const { current, models } = modelFromConfig(res.configOptions);
+    const assignment = res.configOptions.find(option => option.id === 'agent_model_chat');
+    if (assignment?.type === 'select') {
+      this.info.assignmentModels = modelFromConfig([
+        { ...assignment, id: MODEL_CONFIG_ID, category: 'model' },
+      ]).models.filter(option => option.provider === 'openrouter');
+    }
     if (models.length > 0) this.info.models = models;
-    this.info.currentModel = current ?? model;
+    this.info.currentModel = current ?? this.info.currentModel;
   }
 
   async close(): Promise<void> {

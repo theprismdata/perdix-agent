@@ -48,6 +48,7 @@ const COMMAND_FEATURES: Readonly<Record<string, PerdixFeature>> = {
 };
 
 export function commandEnabled(name: string, perdix?: boolean): boolean {
+  if (name === 'assign') return perdix ?? process.env.HERMES_TUI_PERDIX === '1';
   const feature = COMMAND_FEATURES[name];
   return feature === undefined || featureEnabled(feature, perdix);
 }
