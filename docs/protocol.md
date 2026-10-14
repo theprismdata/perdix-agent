@@ -129,3 +129,15 @@ status/cancel/도움말은 실행 중에도 처리되는 제어 요청이므로 
 | `context_usage` | `usage_update{used, size, cost?}` |
 | `trust_notice` | `session_info_update` |
 | `history_replay(user, origin != synthetic)` | `user_message_chunk` |
+
+## 4. 로컬 터미널 팀
+
+팀은 서버 실행 옵션으로 구성하며 별도 ACP 확장을 추가하지 않는다(ADR 0025).
+`--team-worker` CLI는 표준 `session/prompt`를 반복하고 Python 서버가 메시지를 기다린다.
+대기 중에는 모델 요청과 사용량이 발생하지 않는다. 취소는 `session/cancel`이다.
+팀 종료·제거 또는 사용자 취소는 `stopReason: cancelled`로 대기 요청을 끝낸다.
+`/team status`, `/team stop`, `/team leave`도 일반 `session/prompt`로 전달한다.
+서버는 `team` 도구 실행을 기존 `tool_call`/`tool_call_update`로 표시한다.
+팀 도구는 명시적으로 팀에 참여한 세션에만 노출한다. `deny`에서도 팀 내부 통신은
+허용하되 파일 쓰기·명령 실행 권한은 기존 정책으로 차단한다. 팀 메시지는 원본 세션에
+`user_message(origin=synthetic)`로 append한 뒤 수신 확인한다.

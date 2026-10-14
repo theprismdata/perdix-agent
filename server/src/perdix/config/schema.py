@@ -30,6 +30,12 @@ DEFAULT_MODEL_FOR_PROVIDER: dict[str, str] = {
 
 
 class ServerConfig(BaseModel):
+    team: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+    member: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+    team_role: Literal["leader", "member"] = "member"
+    team_worker: bool = False
+    team_db: Path = Path.home() / ".perdix" / "teams.sqlite3"
+    team_project: Path | None = None
     memories: MemoryConfig = Field(default_factory=MemoryConfig)
     trust_project: bool = False
     db_path: str = str(DEFAULT_DB_PATH)
@@ -57,6 +63,10 @@ class ServerConfig(BaseModel):
 
     @model_validator(mode="after")
     def _check_fake_script(self) -> ServerConfig:
+        if (self.team is None) != (self.member is None):
+            raise ValueError("--team과 --member를 함께 지정하세요")
+        if self.team_worker and self.team is None:
+            raise ValueError("--team-worker에는 --team과 --member가 필요합니다")
         if self.provider == "fake" and self.fake_script is None:
             raise ValueError("--provider fake requires --fake-script PATH")
         return self

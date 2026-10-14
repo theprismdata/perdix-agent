@@ -8,6 +8,7 @@ Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https:/
 - 설계: [docs/architecture.md](docs/architecture.md)
 - 하네스 루프: [docs/harness-loop.md](docs/harness-loop.md)
 - 슬래시 목표 루프: [docs/goal-loop.md](docs/goal-loop.md)
+- 여러 터미널의 에이전트 팀: [docs/terminal-teams.md](docs/terminal-teams.md)
 - OpenAI API 키 / ChatGPT 로그인: [docs/openai-auth.md](docs/openai-auth.md)
 - 프로토콜: [docs/protocol.md](docs/protocol.md)
 - 결정 기록: [docs/adr/](docs/adr/)

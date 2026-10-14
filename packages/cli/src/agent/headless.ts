@@ -9,6 +9,8 @@ import type { AgentEvent } from "./types.js";
 
 export interface HeadlessOptions {
   prompt: string;
+  teamWorker?: boolean;
+  team?: boolean;
   json: boolean;
   cwd: string;
   mode?: string;
@@ -95,12 +97,25 @@ export async function runHeadless(opts: HeadlessOptions): Promise<number> {
         if (text) out.write(text);
       }
     });
-    const result = await session.prompt(opts.prompt);
-    return result.stopReason === "end_turn" && result.verification !== "failed" ? 0 : 1;
+    const interrupt = () => { void session?.cancel(); };
+    if (opts.teamWorker) process.on("SIGINT", interrupt);
+    try {
+      let prompt = opts.prompt;
+      do {
+        const result = await session.prompt(prompt);
+        prompt = "";
+        if (opts.teamWorker && result.stopReason === "cancelled") return 0;
+        if (result.stopReason !== "end_turn" || result.verification === "failed") return 1;
+      } while (opts.teamWorker);
+      return 0;
+    } finally {
+      if (opts.teamWorker) process.off("SIGINT", interrupt);
+    }
   } catch (e) {
     err.write(`perdix: ${e instanceof Error ? e.message : String(e)}\n`);
     return 1;
   } finally {
+    if (session && opts.team) await session.prompt("/team leave");
     if (session) await session.close();
     else if (connection) await connection.close();
   }

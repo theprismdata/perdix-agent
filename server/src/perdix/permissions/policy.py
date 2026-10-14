@@ -14,6 +14,7 @@ PermissionMode = Literal["interactive", "deny", "accept-edits", "allowlist"]
 Rule = Decision | dict[str, Decision]
 
 DEFAULT_RULES: dict[str, Rule] = {
+    "team": "allow",
     "switch_mode": "allow",
     "read": "allow",
     "glob": "allow",
@@ -181,7 +182,9 @@ class PermissionPolicy:
         if self.mode == "interactive":
             return decision
         if self.mode == "deny":
-            return "allow" if tool_name in READ_ONLY_BUILTINS and decision == "allow" else "deny"
+            return "allow" if (
+                tool_name in READ_ONLY_BUILTINS or tool_name == "team"
+            ) and decision == "allow" else "deny"
         if self.mode == "accept-edits":
             if tool_name in EDIT_TOOLS and decision != "deny":
                 return "allow"

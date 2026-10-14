@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 import sys
 from typing import Any
 
@@ -28,6 +29,12 @@ def _parser() -> argparse.ArgumentParser:
         "--provider", choices=["anthropic", "openai", "gemini", "openrouter", "fake"],
     )
     parser.add_argument("--model")
+    parser.add_argument("--team")
+    parser.add_argument("--member")
+    parser.add_argument("--team-role", choices=["leader", "member"])
+    parser.add_argument("--team-worker", action="store_true")
+    parser.add_argument("--team-db")
+    parser.add_argument("--team-project")
     parser.add_argument("--openai-auth", choices=["login", "status", "logout"])
     parser.add_argument("--effort")
     parser.add_argument("--memory-config", help="자동 메모리 설정 JSON 파일")
@@ -64,10 +71,19 @@ async def _serve(config: ServerConfig) -> None:
     from perdix.acp.agent import PerdixAgent
 
     agent = PerdixAgent(config)
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    graceful_team_shutdown = (
+        config.team is not None and sys.platform != "win32" and task is not None
+    )
+    if graceful_team_shutdown and task is not None:
+        loop.add_signal_handler(signal.SIGTERM, task.cancel)
     try:
         await acp.run_agent(agent, use_unstable_protocol=True)
     finally:
         await agent.aclose()
+        if graceful_team_shutdown:
+            loop.remove_signal_handler(signal.SIGTERM)
 
 
 def main() -> None:
@@ -118,7 +134,7 @@ def main() -> None:
     )
     try:
         asyncio.run(_serve(config))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         pass
 
 

@@ -182,6 +182,7 @@ class TurnRunner:
         on_step: Callable[[], Awaitable[None]] | None = None,
         memory_root: Path | None = None,
         compactor_factory: ProviderFactory | None = None,
+        before_model: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
@@ -212,6 +213,7 @@ class TurnRunner:
         self.agents_config = agents_config
         self.on_step = on_step
         self.memory_root = memory_root
+        self.before_model = before_model
         # 세션당 하나의 권한 큐(harness-loop.md §3.3 규칙 4). 훅 이후 재평가도 같은 큐를 쓴다.
         self._ask_lock = asyncio.Lock()
 
@@ -345,6 +347,8 @@ class TurnRunner:
     # ------------------------------------------------------------ LLM 스트림
 
     async def _build_request(self, session_id: str, max_tokens: int) -> llm.ModelRequest:
+        if self.before_model is not None:
+            await self.before_model()
         events = await self.store.events(session_id)
         view = project(events, provider=self.provider.name, model=self.model)
         tools = [

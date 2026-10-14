@@ -10,6 +10,7 @@ const promptParams = sessionParams.extend({ text: z.string().min(1) });
 const configParams = z.object({ key: z.string(), value: z.unknown(), session_id: z.string().optional() });
 const slashParams = sessionParams.extend({ command: z.string() });
 const COMMANDS = [
+  ["/team", "팀 안내·상태 조회·종료"],
   ["/help", "연결된 명령 안내"], ["/new", "새 대화"],
   ["/sessions", "저장된 대화 선택·복원"],
   ["/model", "모델 선택"], ["/agent", "Perdix 모드 조회·변경"],
@@ -234,6 +235,7 @@ export class HermesAdapter {
         return { pairs: COMMANDS, canon: { ...Object.fromEntries(COMMANDS.map(([name]) => [name, name])), ...COMMAND_ALIASES },
           categories: [{ name: "Perdix 호환 명령", pairs: COMMANDS }],
           sub: { "/agent": session?.handle.info.modes.map(mode => mode.id) ?? [],
+            "/team": ["status", "stop", "leave", "help"],
             "/mode": session?.handle.info.modes.map(mode => mode.id) ?? [],
             "/model": session?.handle.info.models.map(model => model.value) ?? [],
             "/theme": ["auto", "light", "dark"], "/loop": ["status", "cancel"],
@@ -446,7 +448,7 @@ export class HermesAdapter {
           this.publish(id, "session.info", this.info(session));
           return { output: `모델 변경: ${session.handle.info.currentModel}` };
         }
-        if (name === "loop" || name === "memories") {
+        if (name === "loop" || name === "memories" || name === "team") {
           if (name === "loop" && argument === "cancel" && session.busy) return this.request("slash.exec", { session_id: id, command: "cancel" });
           if (session.busy) throw new HermesRpcError(-32602, "작업이 끝난 뒤 명령을 실행하세요. 취소는 /cancel을 사용하세요.");
           const text = `/${name}${argument ? ` ${argument}` : ""}`;

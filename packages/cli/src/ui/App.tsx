@@ -37,6 +37,7 @@ interface PendingPermission {
 const EXIT_WINDOW_MS = 2000;
 
 export const SLASH_COMMANDS: SlashCommandHint[] = [
+  { name: "/team", hint: "팀 안내·상태 조회·종료" },
   { name: "/memories", hint: "자동 메모리 상태·생성·참조 설정" },
   { name: "/loop", hint: "<목표> 실행·검증·수정 반복" },
   { name: "/agent", hint: "<id> switch agent" },
@@ -68,6 +69,7 @@ function slashCommandsWithArgs(info: SessionInfo): SlashCommandHint[] {
     if (c.name === "/agent") return { ...c, args: info.modes.map((m) => m.id) };
     if (c.name === "/model") return { ...c, args: info.models.map((m) => m.value) };
     if (c.name === "/loop") return { ...c, args: ["status", "cancel", "resume"] };
+    if (c.name === "/team") return { ...c, args: ["status", "stop", "leave", "help"] };
     return c;
   });
 }
@@ -152,6 +154,13 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
       const arg = rest.join(" ");
       const info = handle.info;
       switch (cmd) {
+        case "/team":
+          if (runningRef.current) {
+            notice("작업이 끝난 뒤 팀 명령을 실행하세요. 취소는 Ctrl+C입니다.", true);
+            return;
+          }
+          await handle.prompt(line);
+          return;
         case "/memories":
           if (runningRef.current) {
             notice("작업이 끝난 뒤 메모리 설정을 변경하세요.", true);

@@ -20,6 +20,12 @@ Options:
       --mode <id>            Session mode (chat | plan | build)
       --model <name>         Model id
       --agents-config <path> Role model assignment file
+      --team <name>          로컬 협업 팀 이름
+      --member <name>        이 터미널의 구성원 이름
+      --team-role <role>     leader | member (기본 member)
+      --team-worker          팀 메시지를 기다려 자동 실행
+      --team-project <path>  worktree들이 공유하는 프로젝트 경로
+      --team-db <path>       공유 팀 SQLite 경로
       --resume <sessionId>   Resume a saved session
       --tui <name>          default | hermes (Hermes TUI 평가판)
       --list                 List saved sessions for the working directory
@@ -50,6 +56,12 @@ function parseCli(argv: string[]) {
       mode: { type: "string" },
       model: { type: "string" },
       "agents-config": { type: "string" },
+      team: { type: "string" },
+      member: { type: "string" },
+      "team-role": { type: "string" },
+      "team-worker": { type: "boolean", default: false },
+      "team-project": { type: "string" },
+      "team-db": { type: "string" },
       resume: { type: "string" },
       tui: { type: "string", default: "default" },
       list: { type: "boolean", default: false },
@@ -138,12 +150,21 @@ async function main(): Promise<number> {
     process.stderr.write("perdix: --tui는 default 또는 hermes여야 합니다.\n");
     return 2;
   }
-  if (args.tui === "hermes" && !args.list && (args.prompt !== undefined || !process.stdin.isTTY)) {
+  if (args.tui === "hermes" && !args["team-worker"] && !args.list
+      && (args.prompt !== undefined || !process.stdin.isTTY)) {
     process.stderr.write("perdix: Hermes 평가판은 대화형 터미널에서 실행하세요. -p와 함께 사용할 수 없습니다.\n");
     return 2;
   }
 
   const cwd = resolve(args.cwd ?? process.cwd());
+  if (Boolean(args.team) !== Boolean(args.member)
+      || (args["team-worker"] && !args.team)
+      || (args["team-role"] !== undefined && !["leader", "member"].includes(args["team-role"]))
+      || (args["team-worker"] && (args.resume !== undefined
+        || args.list))) {
+    process.stderr.write("perdix: --team/--member를 함께 지정하세요. --team-worker는 --resume/--list와 함께 사용할 수 없습니다.\n");
+    return 2;
+  }
   try {
     if (ensureCredentialsFile()) {
       process.stderr.write(`API 키 설정 파일을 생성했습니다: ${DEFAULT_CREDENTIALS_PATH}\n사용할 공급자의 api_key에 키를 입력하세요.\n`);
@@ -154,11 +175,20 @@ async function main(): Promise<number> {
   }
   const permissionMode = args["permission-mode"];
   const serverArgs = args["agents-config"] ? ["--agents-config", resolve(args["agents-config"])] : [];
+  if (args.team && args.member) {
+    serverArgs.push("--team", args.team, "--member", args.member,
+      "--team-role", args["team-role"] ?? "member");
+    if (args["team-worker"]) serverArgs.push("--team-worker");
+    if (args["team-project"]) serverArgs.push("--team-project", resolve(args["team-project"]));
+    if (args["team-db"]) serverArgs.push("--team-db", resolve(args["team-db"]));
+  }
   const model = args.model;
 
-  if (args.prompt !== undefined) {
+  if (args.prompt !== undefined || args["team-worker"]) {
     return runHeadless({
-      prompt: args.prompt,
+      prompt: args.prompt ?? "",
+      teamWorker: args["team-worker"],
+      team: args.team !== undefined,
       json: args.json,
       cwd,
       mode: args.mode,
@@ -222,6 +252,10 @@ async function main(): Promise<number> {
       : await connection.newSession({ cwd, mode: args.mode, model });
     if (args.resume && args.mode) await session.setMode(args.mode);
     if (args.resume && args.model) await session.setModel(args.model);
+    if (args.team) {
+      const joined = await session.prompt("/team status");
+      if (joined.stopReason !== "end_turn") return 1;
+    }
 
     // Ink는 raw mode TTY가 필요하다. 파이프 입력이면 텍스트 REPL로 대신한다.
     const ui = process.stdin.isTTY ? await loadUi() : null;
@@ -236,6 +270,7 @@ async function main(): Promise<number> {
     process.stderr.write(`perdix: ${err instanceof Error ? err.message : String(err)}\n`);
     return 1;
   } finally {
+    if (session && args.team) await session.prompt("/team leave");
     if (session) await session.close();
     else if (connection) await connection.close();
   }
