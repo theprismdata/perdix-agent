@@ -10,17 +10,22 @@ const promptParams = sessionParams.extend({ text: z.string().min(1) });
 const configParams = z.object({ key: z.string(), value: z.unknown(), session_id: z.string().optional() });
 const slashParams = sessionParams.extend({ command: z.string() });
 const COMMANDS = [
-  ["/help", "연결된 명령 안내"], ["/new", "새 대화"], ["/clear", "새 대화로 전환"],
-  ["/sessions", "저장된 대화 선택"], ["/resume", "저장된 대화 복원"],
-  ["/model", "모델 선택"], ["/agent", "Perdix 모드 조회·변경"], ["/mode", "chat | plan | build"],
+  ["/help", "연결된 명령 안내"], ["/new", "새 대화"],
+  ["/sessions", "저장된 대화 선택·복원"],
+  ["/model", "모델 선택"], ["/agent", "Perdix 모드 조회·변경"],
   ["/assign", "OpenRouter 모델을 에이전트에 할당"],
   ["/status", "현재 세션 상태"], ["/usage", "서버가 보고한 컨텍스트 사용량"],
-  ["/cancel", "진행 중 작업 취소"], ["/stop", "진행 중 작업 취소"],
+  ["/cancel", "진행 중 작업 취소"],
   ["/save", "자동 저장과 복원 안내"], ["/loop", "Perdix 목표 루프"],
   ["/memories", "Perdix 메모리"], ["/theme", "auto | light | dark"],
-  ["/redraw", "화면 다시 그리기"], ["/copy", "응답 복사"], ["/quit", "종료"], ["/exit", "종료"],
+  ["/redraw", "화면 다시 그리기"], ["/copy", "응답 복사"], ["/quit", "종료"],
   ["/login", "공급자 로그인·API 키 등록"], ["/logout", "공급자 로그아웃"], ["/auth", "인증 상태 확인"],
 ] as const;
+
+const COMMAND_ALIASES: Readonly<Record<string, string>> = {
+  "/clear": "/new", "/resume": "/sessions", "/stop": "/cancel",
+  "/exit": "/quit", "/mode": "/agent",
+};
 
 interface LiveSession {
   readonly handle: SessionHandle;
@@ -226,7 +231,7 @@ export class HermesAdapter {
       case "commands.catalog": {
         const id = typeof params.session_id === "string" ? params.session_id : this.current;
         const session = id ? this.session(id) : null;
-        return { pairs: COMMANDS, canon: Object.fromEntries(COMMANDS.map(([name]) => [name, name])),
+        return { pairs: COMMANDS, canon: { ...Object.fromEntries(COMMANDS.map(([name]) => [name, name])), ...COMMAND_ALIASES },
           categories: [{ name: "Perdix 호환 명령", pairs: COMMANDS }],
           sub: { "/agent": session?.handle.info.modes.map(mode => mode.id) ?? [],
             "/mode": session?.handle.info.modes.map(mode => mode.id) ?? [],
@@ -241,7 +246,8 @@ export class HermesAdapter {
         const { text } = z.object({ text: z.string().default("") }).parse(params);
         if (!text.startsWith("/") || /\s/.test(text)) return { items: [], replace_from: 1 };
         const prefix = text.slice(1).toLowerCase();
-        return { items: COMMANDS.filter(([command]) => command.slice(1).startsWith(prefix))
+        return { items: COMMANDS.filter(([command]) => command.slice(1).startsWith(prefix) ||
+          Object.entries(COMMAND_ALIASES).some(([alias, canonical]) => canonical === command && alias.slice(1).startsWith(prefix)))
           .map(([command, description]) => ({ text: command.slice(1), display: command, meta: description, kind: "command" })), replace_from: 1 };
       }
       case "terminal.resize": return { status: "ok" };
