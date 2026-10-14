@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import re
 import ssl
+import unicodedata
 from collections.abc import AsyncIterator
 from copy import deepcopy
 from dataclasses import dataclass
@@ -130,8 +132,19 @@ class _Usage(BaseModel):
     prompt_tokens_details: _Cache | None = None
 
 
+class _ErrorMetadata(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    limit_source: str | None = None
+    provider_name: str | None = None
+    error_type: str | None = None
+    remedy_hint: str | None = None
+
+
 class _Error(BaseModel):
+    model_config = ConfigDict(frozen=True)
     code: int | str | None = None
+    message: str | None = None
+    metadata: _ErrorMetadata | None = None
 
 
 class _Chunk(BaseModel):
@@ -139,6 +152,60 @@ class _Chunk(BaseModel):
     choices: list[_Choice] = Field(default_factory=list)
     usage: _Usage | None = None
     error: _Error | None = None
+
+
+def _safe_detail(text: str, api_key: str) -> str:
+    # 공급자가 키를 오류 본문에 반사해도 터미널과 로그에 노출하지 않는다.
+    text = text.replace(api_key, "[redacted]") if api_key else text
+    text = re.sub(r"(?i)\bBearer\s+\S+|\bsk-[A-Za-z0-9_-]+", "[redacted]", text)
+    text = "".join(char if not unicodedata.category(char).startswith("C")
+                   or char in "\n\t" else " " for char in text)
+    return text[:2000] + ("…" if len(text) > 2000 else "")
+
+
+def _error_message(
+    title: str, error: _Error | None, model: str, api_key: str,
+    retry_after: str | None = None,
+) -> str:
+    lines = [title, f"모델: {_safe_detail(model, api_key)}"]
+    if error is not None:
+        if error.message:
+            lines.append(f"원인: {_safe_detail(error.message, api_key)}")
+        metadata = error.metadata
+        if metadata is not None:
+            if metadata.provider_name:
+                lines.append(f"공급자: {_safe_detail(metadata.provider_name, api_key)}")
+            if metadata.error_type:
+                lines.append(f"오류 유형: {_safe_detail(metadata.error_type, api_key)}")
+            if metadata.limit_source:
+                lines.append(f"한도 원인: {_safe_detail(metadata.limit_source, api_key)}")
+            if metadata.remedy_hint:
+                lines.append(f"조치: {_safe_detail(metadata.remedy_hint, api_key)}")
+            else:
+                guidance = {
+                    "openrouter_key_limit": "API 키의 사용 한도와 초기화 시점을 확인하세요.",
+                    "openrouter_credits": "계정 크레딧을 확인하거나 요청 토큰 수를 줄이세요.",
+                    "openrouter_in_flight_budget": (
+                        "동시 요청이 끝난 뒤 재시도하거나 요청 크기를 줄이세요."
+                    ),
+                }.get(metadata.limit_source or "")
+                if guidance:
+                    lines.append(f"조치: {guidance}")
+    if retry_after:
+        lines.append(f"재시도 대기 안내 (Retry-After): {_safe_detail(retry_after, api_key)}")
+    return "\n".join(lines)
+
+
+async def _http_error_body(response: httpx2.Response) -> _Error | None:
+    body = bytearray()
+    try:
+        async for chunk in response.aiter_bytes(chunk_size=8192):
+            body.extend(chunk)
+            if len(body) > 65_536:
+                return None
+        return _Chunk.model_validate_json(body).error
+    except (ValidationError, httpx2.TransportError):
+        return None
 
 
 @dataclass(slots=True)
@@ -283,8 +350,13 @@ class OpenRouterProvider:
                 ) as response:
                     if response.status_code >= 400:
                         status = response.status_code
-                        raise ProviderError(f"OpenRouter API HTTP {status}", status=status,
-                                            retryable=status in {408, 429} or status >= 500)
+                        error = await _http_error_body(response)
+                        raise ProviderError(
+                            _error_message(f"OpenRouter API HTTP {status}", error,
+                                           self.model, self._api_key,
+                                           response.headers.get("Retry-After")),
+                            status=status, retryable=status in {408, 429} or status >= 500,
+                        )
                     async for data in _sse(response):
                         if data == "[DONE]":
                             done = True
@@ -294,7 +366,8 @@ class OpenRouterProvider:
                             code = chunk.error.code
                             error_status = code if isinstance(code, int) else None
                             raise ProviderError(
-                                f"OpenRouter 스트림 오류 ({code})", status=error_status,
+                                _error_message(f"OpenRouter 스트림 오류 ({code})", chunk.error,
+                                               self.model, self._api_key), status=error_status,
                                 retryable=code in {408, 429, "server_error"}
                                 or (error_status is not None and error_status >= 500),
                             )
