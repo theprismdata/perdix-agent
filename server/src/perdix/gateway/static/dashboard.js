@@ -1,3 +1,5 @@
+import { WorkflowGraph } from "./graph.js";
+import { WorkflowEditor } from "./workflow-editor.js";
 const byId = (id) => document.getElementById(id);
 const labels = { queued: "대기 중", running: "실행 중", waiting: "승인 대기", completed: "완료", failed: "실패", cancelled: "취소됨", interrupted: "중단됨" };
 const sourceLabels = { web: "웹", telegram: "Telegram", github: "GitHub" };
@@ -13,6 +15,11 @@ let generation = 0;
 const rows = new Map();
 const approvals = new Map();
 const permissionEvents = new Map();
+const workflowGraph = new WorkflowGraph(api);
+const workflowEditor = new WorkflowEditor(api, async (job) => {
+  jobs = [job, ...jobs.filter((item) => item.id !== job.id)];
+  await selectJob(job.id); notice("새 워크플로 계획을 접수했습니다.");
+}, () => workflowGraph.mode === "workflow" ? workflowGraph.snapshot?.plan : null);
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -29,12 +36,16 @@ async function api(path, body) {
   if (response.status === 401) disconnect();
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(typeof data.detail === "string" ? data.detail : "요청에 실패했습니다. 입력을 확인하고 다시 시도하세요.");
+    const error = new Error(typeof data.detail === "string" ? data.detail : "요청에 실패했습니다. 입력을 확인하고 다시 시도하세요.");
+    error.status = response.status;
+    throw error;
   }
   return response.json();
 }
 function disconnect(focus = false) {
   generation += 1;
+  workflowGraph.reset();
+  workflowEditor.reset();
   connected = false;
   token = "";
   sessionStorage.removeItem("perdixGatewayToken");
@@ -86,6 +97,7 @@ function renderDetail() {
 async function selectJob(id) {
   generation += 1;
   selected = id; cursor = 0;
+  workflowGraph.selectJob(id);
   byId("timeline").replaceChildren(); byId("permissions").replaceChildren();
   approvals.clear(); permissionEvents.clear();
   renderJobs(); renderDetail();
@@ -115,6 +127,7 @@ function renderEvent(event) {
 }
 async function refreshDetails() {
   const id = selected, version = generation;
+  await workflowGraph.refresh();
   if (!id) return;
   const events = await api(`/api/jobs/${id}/events?after=${cursor}`);
   if (selected !== id || generation !== version) return;
@@ -178,6 +191,8 @@ async function connect() {
   byId("project").replaceChildren(...status.projects.map((project) => {
     const option = element("option", project.name); option.value = project.name; return option;
   }));
+  workflowGraph.setProject(byId("project").value);
+  workflowEditor.setProject(byId("project").value, status.workflowDefaultModel || "");
   renderChannels(status);
   byId("github-details").hidden = !status.projects.some((p) => p.githubRepository);
   byId("token").value = ""; notice("연결되었습니다."); renderDetail(); await refresh();
@@ -220,3 +235,5 @@ byId("theme").addEventListener("change", () => {
 });
 setInterval(refresh, 2000);
 if (token) connect().catch((error) => notice(error.message, true));
+
+byId("project").addEventListener("change", () => { workflowGraph.setProject(byId("project").value); workflowEditor.setProject(byId("project").value); });

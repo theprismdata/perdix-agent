@@ -10,6 +10,7 @@ const promptParams = sessionParams.extend({ text: z.string().min(1) });
 const configParams = z.object({ key: z.string(), value: z.unknown(), session_id: z.string().optional() });
 const slashParams = sessionParams.extend({ command: z.string() });
 const COMMANDS = [
+  ["/workflow", "plan <request> | start <runId> | status <runId> | resume <runId> | retry <runId> <taskId> | accept <runId> | reject <runId>"],
   ["/team", "팀 안내·상태 조회·종료"],
   ["/help", "연결된 명령 안내"], ["/new", "새 대화"],
   ["/sessions", "저장된 대화 선택·복원"],
@@ -235,6 +236,7 @@ export class HermesAdapter {
         return { pairs: COMMANDS, canon: { ...Object.fromEntries(COMMANDS.map(([name]) => [name, name])), ...COMMAND_ALIASES },
           categories: [{ name: "Perdix 호환 명령", pairs: COMMANDS }],
           sub: { "/agent": session?.handle.info.modes.map(mode => mode.id) ?? [],
+            "/workflow": ["plan", "start", "status", "resume", "retry", "accept", "reject"],
             "/team": ["status", "stop", "leave", "help"],
             "/mode": session?.handle.info.modes.map(mode => mode.id) ?? [],
             "/model": session?.handle.info.models.map(model => model.value) ?? [],
@@ -413,6 +415,11 @@ export class HermesAdapter {
         const name = rawName.toLowerCase();
         const argument = normalized.slice(rawName.length).trim();
         const args = argument ? argument.split(/\s+/) : [];
+        if (name === "workflow") {
+          if (session.busy) throw new HermesRpcError(-32602, "작업이 끝난 뒤 명령을 실행하세요. 취소는 /cancel을 사용하세요.");
+          const text = command.startsWith("/") ? command : `/${command}`;
+          return { type: "send", message: text, display: text };
+        }
         if (name === "help") return { output: "Perdix + Hermes TUI 평가판\n" + COMMANDS.map(([cmd, description]) => `${cmd}  ${description}`).join("\n") + "\n음성·결제·Hermes 플러그인과 상세 설정은 이번 평가판에서 지원하지 않습니다." };
         if (name === "status") return { output: this.statusText(session) };
         if (name === "usage") return { output: session.usage

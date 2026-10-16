@@ -16,6 +16,7 @@ from perdix.gateway.channels import GatewayChannels, GitHubImport, GitHubWebhook
 from perdix.gateway.config import GatewayConfig, GatewaySecrets
 from perdix.gateway.events import GatewayStore, Job, JobEvent
 from perdix.gateway.runtime import GatewayRuntime, SubmitRequest
+from perdix.gateway.workflows import workflow_router
 
 STATIC = Path(__file__).parent / "static"
 
@@ -72,6 +73,7 @@ def create_app(
             raise HTTPException(401, "게이트웨이 연결 토큰을 확인하세요")
 
     auth = [Depends(authorize)]
+    app.include_router(workflow_router(runtime), dependencies=auth)
 
     @app.middleware("http")
     async def security_headers(
@@ -104,6 +106,23 @@ def create_app(
     async def javascript() -> FileResponse:
         return FileResponse(STATIC / "dashboard.js", media_type="text/javascript")
 
+    @app.get("/graph.js")
+    async def graph_script() -> FileResponse:
+        return FileResponse(STATIC / "graph.js", media_type="text/javascript")
+
+    @app.get("/graph.css")
+    async def graph_style() -> FileResponse:
+        return FileResponse(STATIC / "graph.css", media_type="text/css")
+
+    @app.get("/workflow-editor.js")
+    @app.get("/draft-plan.js")
+    @app.get("/draft-canvas.js")
+    @app.get("/editor.css")
+    async def editor_asset(request: Request) -> FileResponse:
+        name = request.url.path.rsplit("/", 1)[-1]
+        media_type = "text/css" if name == "editor.css" else "text/javascript"
+        return FileResponse(STATIC / name, media_type=media_type)
+
     @app.get("/api/status", dependencies=auth)
     async def status() -> dict[str, object]:
         return {
@@ -113,6 +132,7 @@ def create_app(
             ],
             "channels": channels.status.model_dump(),
             "activeJobs": len(runtime.connections),
+            "workflowDefaultModel": config.server.model,
         }
 
     @app.get("/api/jobs", dependencies=auth)

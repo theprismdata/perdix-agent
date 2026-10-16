@@ -1,0 +1,26 @@
+.workflow-panel { margin-bottom: var(--s6); }
+#graph-mode { width: auto; }
+#graph-status, #graph-summary, #graph-legend { margin-bottom: var(--s3); }
+.graph-toolbar { margin-block: var(--s4); }
+.graph-toolbar button { min-width: var(--target); }
+.graph-layout { display: grid; grid-template-columns: minmax(0, 3fr) minmax(220px, 1fr); gap: var(--s6); }
+.graph-layout h3 { margin-top: 0; }
+.graph-canvas { min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: var(--r1); overflow: hidden; height: 360px; }
+#task-graph { width: 100%; height: 100%; touch-action: pan-y; cursor: grab; }
+.graph-node { cursor: pointer; }
+.graph-node rect { fill: var(--surface); stroke: var(--line); }
+.graph-node[aria-pressed="true"] rect, .graph-node:hover rect { fill: var(--wash); }
+.graph-node text { fill: var(--ink); font-size: var(--small); }
+.graph-node .node-meta { fill: var(--muted); }
+.graph-edge { fill: none; stroke: var(--muted); stroke-width: 2; }
+.graph-arrow { fill: var(--muted); }
+.graph-edge.assignment { stroke-dasharray: 6 4; }
+#graph-list { gap: var(--s2); }
+#graph-list .job-row { word-break: keep-all; overflow-wrap: anywhere; }
+#graph-selection { margin-block: var(--s6); }
+#graph-selection-body { display: grid; gap: var(--s3); }
+#graph-selection-body p { white-space: pre-wrap; }
+#graph-log-link { color: var(--accent); display: inline-block; min-height: var(--target); padding-block: var(--s2); }
+#team-picker { margin-bottom: var(--s4); max-width: 400px; }
+@media (max-width: 880px) { .graph-layout { grid-template-columns: minmax(0, 1fr); } #graph-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); } }
+@media (max-width: 540px) { .graph-canvas { height: 300px; } }

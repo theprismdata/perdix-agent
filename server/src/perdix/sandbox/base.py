@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 # 하위 프로세스에 절대 넘기지 않는 env 키 패턴(대소문자 무시). AGENTS.md 규칙 12.
 SECRET_ENV_PATTERNS: tuple[str, ...] = (
@@ -79,6 +79,20 @@ class ExecResult:
     exit_code: int
     timed_out: bool = False
     cancelled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessObservation:
+    """실제 자식의 관측값. 시작 기록 전 OS spawn 구간은 원자적이지 않다."""
+
+    pid: int
+    process_group: int
+    start_identity: str | None
+    phase: Literal["started", "finished"]
+    quiescent: bool = False
+
+
+type ProcessObserver = Callable[[ProcessObservation], Awaitable[None]]
 
 
 class ExecBackend(Protocol):

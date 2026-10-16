@@ -24,6 +24,7 @@ class Job(BaseModel):
     status: JobStatus = "queued"
     session_id: str | None = None
     result: str = ""
+    workflow_run_id: str | None = None
 
 
 class JobEvent(BaseModel):
@@ -105,18 +106,20 @@ class GatewayStore:
             rows = await cursor.fetchall()
         jobs = []
         for row in rows:
-            job = Job.model_validate_json(row[0])
-            # 작업 상태는 마지막 상태 이벤트만 투영한다. 로그 자체는 변경하지 않는다.
-            async with self.db.execute(
-                "SELECT data FROM gateway_events WHERE job_id=? AND kind='state' "
-                "ORDER BY seq DESC LIMIT 1",
-                (job.id,),
-            ) as cursor:
-                state = await cursor.fetchone()
-            if state:
-                job = Job.model_validate({**job.model_dump(), **json.loads(state[0])})
-            jobs.append(job)
+            job = await self.get(Job.model_validate_json(row[0]).id)
+            if job is not None:
+                jobs.append(job)
         return jobs
+
+    async def bind_workflow(self, job_id: str, session_id: str, run_id: str) -> None:
+        job = await self.get(job_id)
+        if job is None:
+            raise ValueError("작업을 찾을 수 없습니다")
+        if job.session_id == session_id and job.workflow_run_id == run_id:
+            return
+        await self.append(job_id, "workflow_binding", {
+            "session_id": session_id, "workflow_run_id": run_id,
+        })
 
     async def get(self, job_id: str) -> Job | None:
         assert self.db is not None
@@ -129,9 +132,12 @@ class GatewayStore:
             return None
         job = Job.model_validate_json(row[0])
         async with self.db.execute(
-            "SELECT data FROM gateway_events WHERE job_id=? AND kind='state' "
-            "ORDER BY seq DESC LIMIT 1",
+            "SELECT data FROM gateway_events WHERE job_id=? "
+            "AND kind IN ('state','workflow_binding') ORDER BY seq",
             (job_id,),
         ) as cursor:
-            state = await cursor.fetchone()
-        return Job.model_validate({**job.model_dump(), **json.loads(state[0])}) if state else job
+            states = await cursor.fetchall()
+        data = job.model_dump()
+        for state in states:
+            data.update(json.loads(state[0]))
+        return Job.model_validate(data)

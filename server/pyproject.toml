@@ -1,6 +1,6 @@
 [project]
 name = "perdix"
-version = "0.0.0"
+version = "0.0.1"
 description = "Perdix Agent server (ACP over stdio)"
 requires-python = ">=3.12"
 dependencies = [
@@ -16,6 +16,8 @@ dependencies = [
   "filelock>=4.1,<5",
   "fastapi>=0.115,<1",
   "uvicorn>=0.30,<1",
+  "langgraph==1.2.15",
+  "langgraph-checkpoint-sqlite==3.1.2",
 ]
 
 [project.scripts]

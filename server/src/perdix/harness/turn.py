@@ -183,6 +183,8 @@ class TurnRunner:
         memory_root: Path | None = None,
         compactor_factory: ProviderFactory | None = None,
         before_model: Callable[[], Awaitable[bool]] | None = None,
+        before_provider: Callable[[], Awaitable[None]] | None = None,
+        before_tool: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
@@ -214,6 +216,8 @@ class TurnRunner:
         self.on_step = on_step
         self.memory_root = memory_root
         self.before_model = before_model
+        self.before_provider = before_provider
+        self.before_tool = before_tool
         # 세션당 하나의 권한 큐(harness-loop.md §3.3 규칙 4). 훅 이후 재평가도 같은 큐를 쓴다.
         self._ask_lock = asyncio.Lock()
 
@@ -395,6 +399,8 @@ class TurnRunner:
             await sink(TextDelta(text=text))
 
         async def before_call() -> None:
+            if self.before_provider is not None:
+                await self.before_provider()
             self.budget.check_steps(self._turn_steps + self._compaction_steps)
             self.budget.consume_step()
             self._compaction_steps += 1
@@ -452,6 +458,8 @@ class TurnRunner:
                 finished_text.append("".join(current_text))
                 current_text.clear()
 
+        if self.before_provider is not None:
+            await self.before_provider()
         stream = _until_cancelled(self.provider.stream(req), cancel)
         try:
             async with contextlib.aclosing(stream):
@@ -746,6 +754,8 @@ class TurnRunner:
             session_store=self.store,
             memory_root=self.memory_root,
         )
+        if self.before_tool is not None:
+            await self.before_tool()
         output = await self._run_cancellable(tool, ctx, input, cancel)
         if output is None:
             await self._finish(session_id, call, tool_error("cancelled"), sink)

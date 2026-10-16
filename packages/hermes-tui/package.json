@@ -1,6 +1,6 @@
 {
   "name": "@perdix/hermes-tui",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "exports": { ".": { "types": "./src/launch.ts", "import": "./dist/launch.js" } },

@@ -57,6 +57,7 @@
 | `session/new` 요청 `_meta.perdix` | `{ model?, mode?, permissionMode? }` | 세션별 덮어쓰기. `permissionMode`는 서버 argv보다 **완화할 수 없다** |
 | `tool_call` `_meta.perdix` | `{ parentToolCallId? }` | 서브에이전트 중첩 렌더링 힌트 |
 | `session/prompt` 응답 `_meta.perdix` | `{ verification?: "passed" \| "failed" \| "skipped" }` | 검증 게이트 결과 |
+| `session/update`의 `update._meta.perdix.workflow` | `{ schemaVersion: 1, kind: "snapshot" \| "event", runId, seq, payload }` | 선택적 workflow 투영/이벤트. 표준 텍스트를 함께 제공 |
 | C→A `_perdix/checkpoint/list`, `_perdix/checkpoint/restore` | 체크포인트 | `checkpoints` capability 광고 시에만 |
 | C→A `_perdix/diagnostics` (알림) | IDE 진단을 서버에 전달 | 서버는 "클라이언트가 준 진단"으로만 취급 |
 
@@ -66,6 +67,19 @@ SDK 구현 메모:
 - 확장 메서드는 핸들러에 앞의 `_`가 제거된 이름(`perdix/checkpoint/list`)으로 전달된다.
 
 표준 ACP 클라이언트(Zed 등)는 확장을 전혀 몰라도 채팅, 도구 실행, 권한 요청, 모드/모델 전환이 동작해야 한다.
+
+Workflow 명령은 `/workflow plan <요청>`, `start <runId>`, `status <runId>`,
+`resume <runId>`, `retry <runId> <taskId>`, `accept <runId>`, `reject <runId>`이며
+표준 `session/prompt` text로 전달한다. 취소는 `session/cancel`이다.
+metadata는 Python SDK update 객체의 `field_meta={"perdix": {"workflow": envelope}}`로
+설정한다. notification 외곽 kwargs에만 넣으면 update를 저장하는 client에서 유실된다.
+`payload`는 kind에 따른 snapshot/event이며, 알 수 없는 schemaVersion은 무시하고 표준
+agent_message_chunk/plan/tool_call 콘텐츠로 표시한다. 수락 명령은 사용자 origin만 허용한다.
+`resume`은 완료 ledger를 재사용하고 중단 흔적을 대조한다. unknown 부작용을 자동 재실행하지
+않으며 schema/graph 버전 불일치에서는 열람만 허용한다. `accept`는 passed receipt의
+candidateCommit/candidateTree와 현재 후보가 일치하고 대상 HEAD가 baseCommit이며 작업 트리가
+깨끗할 때만 fast-forward한다. 거절·충돌 시 사용자 파일을 덮어쓰거나 강제 reset하지 않는다.
+상세 상태·영속 계약은 [ADR 0026](adr/0026-verified-team-workflows.md)을 따른다.
 
 ### 1.3 권한 모드 (`--permission-mode`)
 | 모드 | 의미 | 용도 |

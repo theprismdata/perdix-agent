@@ -8,6 +8,8 @@
   <title>작업 대시보드 · Perdix</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/dashboard.css">
+  <link rel="stylesheet" href="/graph.css">
+  <link rel="stylesheet" href="/editor.css">
   <script type="module" src="/dashboard.js"></script>
 </head>
 <body>
@@ -29,6 +31,58 @@
     </section>
     <div id="workspace" hidden>
       <section class="channel-bar" aria-label="채널 연결 상태"><div><span class="eyebrow">연결된 채널</span><div id="channels" class="actions"></div></div><p class="muted">화면을 닫아도 접수한 작업은 계속 실행됩니다.</p></section>
+      <details id="workflow-editor" class="panel workflow-editor">
+        <summary>노드로 워크플로 만들기 <span id="draft-count" class="small muted">0/20 노드</span></summary>
+        <p class="muted small">① 노드 추가 · ② 설정 적용 · ③ 출력점 → 입력점 연결. 새 계획을 만든 뒤 별도로 실행합니다.</p>
+        <div class="field"><label for="draft-objective">워크플로 목표</label><input id="draft-objective" maxlength="2000" placeholder="예: 로그인 기능 구현과 검증"></div>
+        <div class="actions draft-toolbar" aria-label="노드 추가 도구">
+          <button type="button" class="secondary" data-add-role="analyze">+ 분석 노드</button><button type="button" class="secondary" data-add-role="implement">+ 구현 노드</button><button type="button" class="secondary" data-add-role="review">+ 리뷰 노드</button>
+          <button type="button" class="secondary" id="draft-copy">선택한 계획 복사</button><button type="button" class="danger" id="draft-new">초안 비우기</button>
+        </div>
+        <p id="draft-status" class="small muted" role="status" aria-live="polite">노드를 추가하거나 선택한 계획을 복사하세요.</p>
+        <div class="draft-layout">
+          <div class="stack">
+            <div class="actions" aria-label="편집 그래프 보기 도구"><button type="button" class="secondary" id="draft-zoom-out" aria-label="편집 그래프 축소">−</button><button type="button" class="secondary" id="draft-zoom-in" aria-label="편집 그래프 확대">+</button><button type="button" class="secondary" id="draft-fit">편집 그래프 맞춤</button></div>
+            <div class="draft-canvas"><svg id="draft-graph" role="group" aria-label="워크플로 편집 그래프" tabindex="0"></svg></div>
+            <p id="draft-empty" class="muted small">위의 + 버튼으로 첫 노드를 추가하세요. 노드는 끌어서 배치하고 출력 연결점에서 다음 노드의 입력점으로 연결합니다.</p>
+            <div id="draft-list" class="draft-list" aria-label="편집 노드 목록"></div>
+            <fieldset class="draft-connections"><legend>노드 연결</legend><div class="draft-connect-fields"><div class="field"><label for="draft-from">출발 노드</label><select id="draft-from"></select></div><div class="field"><label for="draft-to">도착 노드</label><select id="draft-to"></select></div></div><button type="button" class="secondary" id="draft-connect">노드 연결 추가</button><div id="draft-edges" class="stack" aria-label="편집 연결 목록"></div></fieldset>
+          </div>
+          <section class="draft-inspector" aria-labelledby="draft-inspector-title">
+            <h3 id="draft-inspector-title">노드 설정</h3><p id="draft-inspector-empty" class="muted small">노드를 추가하거나 선택하면 여기서 설정할 수 있습니다.</p>
+            <form id="draft-node-form" class="stack" hidden>
+              <div class="field"><label for="draft-title">노드 이름</label><input id="draft-title" maxlength="200" required></div>
+              <div class="field"><label for="draft-taskId">노드 ID</label><input id="draft-taskId" maxlength="128" required pattern="[a-z0-9][a-z0-9_\-]*" spellcheck="false"></div>
+              <div class="field"><label for="draft-role">노드 역할</label><select id="draft-role"><option value="analyze">분석</option><option value="implement">구현</option><option value="review">리뷰</option></select></div>
+              <div class="field"><label for="draft-model">사용할 모델</label><input id="draft-model" maxlength="200" required placeholder="서버에 설정한 모델 ID" spellcheck="false"></div>
+              <div class="field"><label for="draft-paths">파일 범위 · 한 줄에 하나</label><textarea id="draft-paths" rows="2" maxlength="4000" required></textarea></div>
+              <div class="field"><label for="draft-acceptance">완료 조건 · 한 줄에 하나</label><textarea id="draft-acceptance" rows="3" maxlength="4000" required placeholder="예: 로그인 테스트 통과"></textarea></div>
+              <details><summary class="small">산출물 요구</summary><label class="small" for="draft-artifactRequirements">필요한 산출물 · 한 줄에 하나</label><textarea id="draft-artifactRequirements" rows="2" maxlength="2000"></textarea></details>
+              <button type="submit">노드 설정 적용</button><button type="button" class="danger" id="draft-delete-node">선택 노드 삭제</button>
+              <p class="small muted">이름·모델·경로·완료 조건을 적용하면 초안이 이 탭에 저장됩니다. 노드의 방향키로 위치를 조정할 수 있습니다.</p>
+            </form>
+          </section>
+        </div>
+        <div class="actions draft-footer"><button type="button" id="draft-submit">새 계획 만들기</button><p class="small muted">초안을 제출합니다. 기존 실행 기록이나 원본 코드는 바뀌지 않습니다.</p></div>
+      </details>
+      <section id="workflow-panel" class="panel workflow-panel" aria-labelledby="workflow-heading">
+        <div class="section-heading"><h2 id="workflow-heading">팀 진행 상황</h2><div class="actions"><label for="graph-mode" class="small">보기</label><select id="graph-mode"><option value="workflow">작업 의존성</option><option value="team">수동 팀 배정</option></select></div></div>
+        <div id="team-picker" class="field" hidden><label for="graph-team">팀</label><select id="graph-team"></select></div>
+        <p id="graph-status" role="status" aria-live="polite">목록에서 작업을 선택하세요.</p>
+        <div id="graph-body" hidden>
+          <p id="graph-summary" class="small muted"></p>
+          <div id="workflow-controls" class="actions" aria-label="워크플로 제어"><button type="button" class="secondary" data-workflow-action="start">계획 실행</button><button type="button" class="secondary" data-workflow-action="resume">재개 요청</button><button type="button" class="secondary" data-workflow-action="retry">선택 작업 재시도</button><button type="button" data-workflow-action="accept">검증된 변경 수락</button><button type="button" class="danger" data-workflow-action="reject">변경 거절</button></div>
+          <p id="workflow-control-status" role="status" class="small"></p>
+          <p id="graph-legend" class="small muted">화살표는 선행 작업 → 후행 작업을 뜻합니다. 담당자는 작업 속성입니다.</p>
+          <div class="graph-toolbar actions" aria-label="그래프 보기 도구">
+            <button type="button" class="secondary" id="graph-minus" aria-label="그래프 축소">−</button><button type="button" class="secondary" id="graph-plus" aria-label="그래프 확대">+</button><button type="button" class="secondary" id="graph-fit">맞춤 보기</button>
+            <button type="button" class="secondary" data-pan="left" aria-label="그래프 왼쪽으로 이동">←</button><button type="button" class="secondary" data-pan="right" aria-label="그래프 오른쪽으로 이동">→</button><button type="button" class="secondary" data-pan="up" aria-label="그래프 위로 이동">↑</button><button type="button" class="secondary" data-pan="down" aria-label="그래프 아래로 이동">↓</button>
+          </div>
+          <div class="graph-layout"><div class="graph-canvas"><svg id="task-graph" role="group" aria-label="작업 그래프"></svg></div><div><h3>작업 목록</h3><div id="graph-list" class="stack"></div></div></div>
+          <section id="graph-selection" aria-labelledby="graph-selection-title"><h3 id="graph-selection-title">작업을 선택하세요</h3><div id="graph-selection-body"></div></section>
+          <a id="graph-log-link" href="#timeline">원본 실행 기록 보기</a>
+        </div>
+      </section>
       <div class="layout">
         <div class="stack">
           <section class="panel" aria-labelledby="new-heading">

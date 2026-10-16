@@ -9,7 +9,7 @@ import signal
 from collections.abc import Sequence
 from pathlib import Path
 
-from perdix.sandbox.base import ExecResult, scrub_env
+from perdix.sandbox.base import ExecResult, ProcessObservation, ProcessObserver, scrub_env
 
 # SIGTERM 후 SIGKILL까지 기다리는 시간(초)
 KILL_GRACE_SECONDS = 2.0
@@ -44,9 +44,18 @@ async def _kill_group(pgid: int) -> None:
 
 
 class LocalBackend:
-    def __init__(self, base_env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        base_env: dict[str, str] | None = None,
+        *,
+        process_observer: ProcessObserver | None = None,
+    ) -> None:
         # base_env를 주지 않으면 서버 프로세스 env를 쓴다. 어느 쪽이든 항상 scrub한다.
         self._base_env = base_env
+        self._process_observer = process_observer
+
+    def with_process_observer(self, observer: ProcessObserver) -> LocalBackend:
+        return LocalBackend(self._base_env, process_observer=observer)
 
     def _env(self, env_extra: dict[str, str] | None) -> dict[str, str]:
         env = scrub_env(self._base_env if self._base_env is not None else os.environ)
@@ -72,7 +81,7 @@ class LocalBackend:
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
-        return await _collect(proc, timeout, cancel)
+        return await self._collect_observed(proc, timeout, cancel, cwd)
 
     async def run_argv(
         self,
@@ -92,7 +101,70 @@ class LocalBackend:
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
-        return await _collect(proc, timeout, cancel)
+        return await self._collect_observed(proc, timeout, cancel, cwd)
+
+    async def _collect_observed(
+        self,
+        proc: asyncio.subprocess.Process,
+        timeout: float,
+        cancel: asyncio.Event,
+        cwd: Path,
+    ) -> ExecResult:
+        observer = self._process_observer
+        if observer is None:
+            return await _collect(proc, timeout, cancel)
+        finished = False
+        observed = False
+        identity: str | None = None
+        try:
+            identity = await _start_identity(proc.pid, cwd)
+            observed = True
+            await observer(ProcessObservation(proc.pid, proc.pid, identity, "started"))
+            result = await _collect(proc, timeout, cancel)
+            await observer(
+                ProcessObservation(
+                    proc.pid,
+                    proc.pid,
+                    identity,
+                    "finished",
+                    not _group_alive(proc.pid),
+                )
+            )
+            finished = True
+            return result
+        finally:
+            # 관찰자 저장 실패도 현재 소유한 자식을 남기지 않는다.
+            if not finished:
+                await _kill_group(proc.pid)
+                await proc.wait()
+                if observed:
+                    await observer(
+                        ProcessObservation(
+                            proc.pid,
+                            proc.pid,
+                            identity,
+                            "finished",
+                            not _group_alive(proc.pid),
+                        )
+                    )
+
+
+async def _start_identity(pid: int, cwd: Path) -> str | None:
+    """OS 시작 정보를 진단용으로 기록하며 재시작 뒤 PID 종료 권한으로 쓰지 않는다."""
+    stat_path = Path(f"/proc/{pid}/stat")
+    try:
+        stat = stat_path.read_text()
+    except (FileNotFoundError, PermissionError):
+        result = await LocalBackend().run_argv(
+            ["ps", "-p", str(pid), "-o", "lstart="],
+            cwd=cwd,
+            timeout=2,
+            cancel=asyncio.Event(),
+            env_extra={"LC_ALL": "C"},
+        )
+        return f"ps-lstart:{result.stdout.strip()}" if result.stdout.strip() else None
+    fields = stat.rsplit(")", 1)[1].split()
+    return f"proc-start-ticks:{fields[19]}"
 
 
 async def _collect(

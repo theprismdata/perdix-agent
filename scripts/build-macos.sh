@@ -15,7 +15,7 @@ pnpm --filter @perdix/protocol build
 bun build packages/cli/src/main.ts --compile --target="bun-darwin-$arch" --define 'process.env.DEV=false' --define 'process.env.NODE_ENV="production"' --outfile "$payload/perdix"
 pnpm --filter perdix-vscode build
 pnpm --filter perdix-vscode exec vsce package --no-dependencies --allow-missing-repository --out "$payload/perdix.vsix"
-PYTHONDONTWRITEBYTECODE=1 uv run --project server --locked --python 3.12 --with pyinstaller==6.22.3 pyinstaller --noconfirm --clean --onedir --name perdix-server --distpath "$work/python-dist" --workpath "$work/python-build" --specpath "$work" --paths "$root/server/src" --collect-all acp --collect-all anthropic --collect-all openai --collect-all jsonschema_specifications "$root/server/scripts/frozen_entry.py"
+PYTHONDONTWRITEBYTECODE=1 uv run --project server --locked --python 3.12 --with pyinstaller==6.22.3 pyinstaller --noconfirm --clean --onedir --name perdix-server --distpath "$work/python-dist" --workpath "$work/python-build" --specpath "$work" --paths "$root/server/src" --collect-all perdix --collect-all langgraph --collect-all langchain_core --collect-all acp --collect-all anthropic --collect-all openai --collect-all jsonschema_specifications "$root/server/scripts/frozen_entry.py"
 mv "$work/python-dist/perdix-server" "$payload/server"
 swiftc scripts/macos/Installer.swift -target "$swift_arch-apple-macosx13.0" -framework AppKit -o "$app/Contents/MacOS/PerdixSetup"
 cp scripts/macos/Info.plist "$app/Contents/Info.plist"

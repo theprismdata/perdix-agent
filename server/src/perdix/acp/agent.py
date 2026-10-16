@@ -68,6 +68,7 @@ from acp.schema import (
 from perdix import __version__
 from perdix.acp.mapping import to_session_update
 from perdix.acp.memories import MEMORY_OPTION_IDS, SessionMemories
+from perdix.acp.workflows import execute_workflow, trusted_config
 from perdix.config.agents import AGENT_ROLES, assign_openrouter, load_agents_config
 from perdix.config.credentials import load_credentials
 from perdix.config.schema import ServerConfig
@@ -114,6 +115,9 @@ from perdix.tools.base import ToolKind, ToolOutput
 from perdix.tools.mode import SwitchModeTool
 from perdix.tools.registry import ToolRegistry, builtin_tools
 from perdix.tools.team import TeamTool
+from perdix.workflows.commands import parse_workflow_command
+from perdix.workflows.service import WorkflowContext, WorkflowService
+from perdix.workflows.store import WorkflowStore
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +239,10 @@ class PerdixAgent:
         self._store: EventStore | None = None
         self._store_lock = asyncio.Lock()
         self._sessions: dict[str, _SessionState] = {}
+        workflow_root = Path(config.db_path).resolve().parent
+        self._workflows = WorkflowService(
+            WorkflowStore(workflow_root / "workflows.sqlite3"), workflow_root / "workflow-worktrees"
+        )
         self._teams: dict[str, TeamStore] = {}
         self._runner = SessionRunner(self._make_turn_runner)
         self._registry = ToolRegistry(builtin_tools())
@@ -837,6 +845,13 @@ class PerdixAgent:
                             ),
                         ),
                         AvailableCommand(
+                            name="workflow", description="계획·격리 실행·검증·명시적 수락",
+                            input=AvailableCommandInput.model_validate({
+                                "hint": "plan <요청> | start|status|resume|accept|reject <runId> "
+                                "| retry <runId> <taskId>",
+                            }),
+                        ),
+                        AvailableCommand(
                             name="memories", description="메모리 자동 생성과 참조를 제어합니다",
                             input=AvailableCommandInput.model_validate(
                                 {"hint": "use on|off | generate on|off"}
@@ -894,6 +909,47 @@ class PerdixAgent:
 
         async def ask_permission(req: PermissionRequest) -> PermissionOutcome:
             return await self._ask_permission(session_id, req)
+
+        try:
+            workflow_command = (
+                parse_workflow_command(blocks[0].text)
+                if len(blocks) == 1 and isinstance(blocks[0], TextBlock) else None
+            )
+        except ValueError as exc:
+            raise RequestError(-32602, str(exc)) from exc
+        if workflow_command is not None:
+            if self.config.team_worker:
+                raise RequestError(-32600, "팀 worker는 workflow 제어 명령을 실행할 수 없습니다")
+
+            async def execute_workflow_turn(turn: TurnRunner, cancel: asyncio.Event) -> TurnResult:
+                from acp.schema import AgentMessageChunk, AgentPlanUpdate
+
+                async def emit(update: AgentPlanUpdate | AgentMessageChunk) -> None:
+                    if self._conn is not None:
+                        await self._conn.session_update(session_id=session_id, update=update)
+
+                await store.append(session_id, "user_message", {
+                    "content": [block.model_dump() for block in blocks], "origin": "user",
+                })
+                root = self._state(session_id).cwd.resolve()
+                trusted = self._trusted_root == root
+                context = WorkflowContext(
+                    session_id=session_id, project_root=root, turn=turn, cancel=cancel,
+                    sink=sink, ask_permission=ask_permission, trusted=trusted,
+                    trusted_config_json=trusted_config(root, trusted),
+                )
+                return await execute_workflow(self._workflows, workflow_command, context, emit)
+
+            try:
+                result = await self._runner.run(session_id, execute_workflow_turn)
+            except TurnBusyError as exc:
+                raise RequestError(-32600, str(exc), {"sessionId": session_id}) from exc
+            except ValueError as exc:
+                raise RequestError(-32602, str(exc)) from exc
+            return PromptResponse(stop_reason=result.stop_reason, field_meta=(
+                {"perdix": {"verification": result.verification}}
+                if result.verification is not None else None
+            ))
 
         if argument in ("", "status", "cancel"):
             if argument == "cancel":

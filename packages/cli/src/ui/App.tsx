@@ -37,6 +37,7 @@ interface PendingPermission {
 const EXIT_WINDOW_MS = 2000;
 
 export const SLASH_COMMANDS: SlashCommandHint[] = [
+  { name: "/workflow", hint: "plan <request> | start <runId> | status <runId> | resume <runId> | retry <runId> <taskId> | accept <runId> | reject <runId>" },
   { name: "/team", hint: "팀 안내·상태 조회·종료" },
   { name: "/memories", hint: "자동 메모리 상태·생성·참조 설정" },
   { name: "/loop", hint: "<목표> 실행·검증·수정 반복" },
@@ -70,6 +71,7 @@ function slashCommandsWithArgs(info: SessionInfo): SlashCommandHint[] {
     if (c.name === "/model") return { ...c, args: info.models.map((m) => m.value) };
     if (c.name === "/loop") return { ...c, args: ["status", "cancel", "resume"] };
     if (c.name === "/team") return { ...c, args: ["status", "stop", "leave", "help"] };
+    if (c.name === "/workflow") return { ...c, args: ["plan", "start", "status", "resume", "retry", "accept", "reject"] };
     return c;
   });
 }
@@ -154,6 +156,13 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
       const arg = rest.join(" ");
       const info = handle.info;
       switch (cmd) {
+        case "/workflow":
+          if (runningRef.current) {
+            notice("작업이 끝난 뒤 workflow 명령을 실행하세요. 취소는 Ctrl+C입니다.", true);
+            return;
+          }
+          await handle.prompt(line);
+          return;
         case "/team":
           if (runningRef.current) {
             notice("작업이 끝난 뒤 팀 명령을 실행하세요. 취소는 Ctrl+C입니다.", true);
