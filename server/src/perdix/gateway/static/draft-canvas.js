@@ -1,6 +1,7 @@
 import { roleNames } from "./draft-plan.js";
 
 const ns = "http://www.w3.org/2000/svg";
+const stateLabels = { pending: "대기", ready: "준비", running: "실행 중", completed: "완료", failed: "실패", blocked: "차단", interrupted: "중단", unknown: "결과 불명", cancelled: "취소" };
 const brief = (text, length) => { const characters = Array.from(text); return characters.length > length ? characters.slice(0, length - 1).join("") + "…" : text; };
 function svg(tag, attrs = {}, text) {
   const node = document.createElementNS(ns, tag);
@@ -62,11 +63,22 @@ export class DraftCanvas {
     if (from) this.callbacks.connect(from, to);
     this.draw();
   }
-  update(plan, positions, selection) {
-    this.plan = plan; this.positions = positions; this.selection = selection;
-    plan.tasks.forEach((task, index) => {
-      if (!positions[task.taskId]) positions[task.taskId] = { x: 48 + (index % 3) * 296, y: 48 + Math.floor(index / 3) * 144 };
-    });
+  update(plan, positions, selection, states = this.states || {}) {
+    this.plan = plan; this.positions = positions; this.selection = selection; this.states = states;
+    // 위치가 없는 노드는 의존성 깊이별 열에 배치한다(왼쪽 선행 → 오른쪽 후행).
+    const levels = new Map(), byKey = new Map(plan.tasks.map((task) => [task.taskId, task]));
+    const level = (task, seen = new Set()) => {
+      if (levels.has(task.taskId)) return levels.get(task.taskId);
+      if (seen.has(task.taskId)) return 0;
+      const next = new Set(seen).add(task.taskId), parents = (task.dependencies || []).map((key) => byKey.get(key)).filter(Boolean);
+      const value = parents.length ? Math.max(...parents.map((parent) => level(parent, next))) + 1 : 0;
+      levels.set(task.taskId, value); return value;
+    };
+    const rows = new Map();
+    for (const task of plan.tasks) {
+      const column = level(task), row = rows.get(column) || 0; rows.set(column, row + 1);
+      if (!positions[task.taskId]) positions[task.taskId] = { x: 48 + column * 296, y: 48 + row * 136 };
+    }
     if (this.pending && !plan.tasks.some((task) => task.taskId === this.pending)) this.pending = null;
     this.draw();
   }
@@ -90,8 +102,10 @@ export class DraftCanvas {
     }
     for (const task of this.plan.tasks) {
       const key = task.taskId, point = this.positions[key];
-      const group = svg("g", { class: "draft-node", transform: `translate(${point.x} ${point.y})`, "data-key": key, "aria-pressed": String(this.selection === key), "aria-label": `${task.title} 노드`, "data-focus-key": key, role: "button", tabindex: 0 });
-      group.append(svg("rect", { width: 224, height: 88, rx: 8 }), svg("title", {}, `${task.title}\n${key}`), svg("text", { x: 16, y: 28 }, brief(task.title, 12)), svg("text", { x: 16, y: 53, class: "node-meta" }, brief(`${roleNames[task.role]} · ${task.model || "모델 설정 필요"}`, 12)), svg("text", { x: 16, y: 74, class: "node-meta" }, brief(key, 14)));
+      const state = this.states?.[key];
+      const group = svg("g", { class: `draft-node role-${task.role}`, ...(state ? { "data-state": state } : {}), transform: `translate(${point.x} ${point.y})`, "data-key": key, "aria-pressed": String(this.selection === key), "aria-label": `${task.title} 노드`, "data-focus-key": key, role: "button", tabindex: 0 });
+      group.append(svg("rect", { width: 224, height: 88, rx: 8 }), svg("title", {}, `${task.title}\n${key}`), svg("text", { x: 18, y: 31, class: "node-title" }, brief(task.title, 15)), svg("text", { x: 18, y: 54, class: "node-meta" }, brief(task.acceptance?.[0] || "해야 할 일을 입력하세요", 18)), svg("text", { x: 18, y: 75, class: "node-meta node-role" }, roleNames[task.role]), svg("rect", { class: "node-role-bar", width: 6, height: 88, rx: 3 }));
+      if (state) group.append(svg("text", { x: 208, y: 24, class: "node-state", "text-anchor": "end" }, stateLabels[state] || state));
       group.addEventListener("click", (event) => { if (!event.target.closest("[data-port]")) this.callbacks.select(key); });
       group.addEventListener("keydown", (event) => {
         if (event.target !== group) return;
@@ -115,6 +129,12 @@ export class DraftCanvas {
         handle.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); event.stopPropagation(); activate(); } });
         group.append(handle);
       }
+      const add = svg("g", { class: "draft-add", role: "button", tabindex: 0, "aria-label": `${task.title} 다음에 단계 추가`, "data-focus-key": `${key}-add` });
+      add.append(svg("title", {}, "다음 단계 추가"), svg("circle", { cx: 250, cy: 44, r: 15 }), svg("text", { x: 250, y: 50, "text-anchor": "middle" }, "+"));
+      const addAfter = (event) => { event.stopPropagation(); this.callbacks.addAfter?.(key); };
+      add.addEventListener("click", addAfter);
+      add.addEventListener("keydown", (event) => { if (["Enter", " "].includes(event.key)) { event.preventDefault(); addAfter(event); } });
+      group.append(add);
       canvas.append(group);
     }
     this.applyView();
@@ -122,7 +142,13 @@ export class DraftCanvas {
   }
   fit() {
     const points = this.plan.tasks.map((task) => this.positions[task.taskId]);
-    this.view = [0, 0, Math.max(880, ...points.map((point) => point.x + 272)), Math.max(480, ...points.map((point) => point.y + 136))]; this.applyView();
+    if (!points.length) { this.view = [0, 0, 880, 480]; this.applyView(); return; }
+    const pad = 40, minX = Math.min(...points.map((p) => p.x)) - pad, minY = Math.min(...points.map((p) => p.y)) - pad;
+    const boundsW = Math.max(...points.map((p) => p.x)) + 224 + pad - minX, boundsH = Math.max(...points.map((p) => p.y)) + 88 + pad - minY;
+    const rect = this.canvas.getBoundingClientRect(), cw = rect.width || 600, ch = rect.height || 480;
+    // 캔버스 비율에 맞춰 중앙 정렬하고, 노드가 적을 때 과하게 커지지 않도록 확대를 제한한다.
+    const scale = Math.min(cw / boundsW, ch / boundsH, 1.25), w = cw / scale, h = ch / scale;
+    this.view = [minX - (w - boundsW) / 2, minY - (h - boundsH) / 2, w, h]; this.applyView();
   }
   zoom(factor) { const [x, y, w, h] = this.view, next = Math.max(200, Math.min(10000, w * factor)); this.view = [x + (w - next) / 2, y + (h - h * next / w) / 2, next, h * next / w]; this.applyView(); }
   applyView() { this.canvas.setAttribute("viewBox", this.view.join(" ")); }

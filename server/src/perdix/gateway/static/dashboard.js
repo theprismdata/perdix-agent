@@ -12,6 +12,9 @@ let connected = false;
 let networkFailed = false;
 let channelStatus = null;
 let generation = 0;
+let autoLoadJob = null;
+let autoLoadStarted = 0;
+let lastRequest = "";
 const rows = new Map();
 const approvals = new Map();
 const permissionEvents = new Map();
@@ -19,7 +22,12 @@ const workflowGraph = new WorkflowGraph(api);
 const workflowEditor = new WorkflowEditor(api, async (job) => {
   jobs = [job, ...jobs.filter((item) => item.id !== job.id)];
   await selectJob(job.id); notice("새 워크플로 계획을 접수했습니다.");
-}, () => workflowGraph.mode === "workflow" ? workflowGraph.snapshot?.plan : null);
+}, () => workflowGraph.mode === "workflow" ? workflowGraph.snapshot?.plan : null, () => {
+  const states = Object.create(null);
+  if (workflowGraph.mode !== "workflow") return states;
+  for (const attempt of workflowGraph.snapshot?.attempts || []) states[attempt.taskId] = attempt.status;
+  return states;
+});
 
 function element(tag, text, className) {
   const node = document.createElement(tag);
@@ -32,7 +40,7 @@ function notice(message, error = false) {
   byId("notice").className = error ? "error" : "";
 }
 async function api(path, body) {
-  const response = await fetch(path, { headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
+  const response = await fetch(path, { headers: { "X-Perdix-Client": "dashboard", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
   if (response.status === 401) disconnect();
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -162,13 +170,81 @@ async function refreshDetails() {
     card.append(actions); approvals.set(permission.permissionId, card); byId("permissions").append(card);
   }
 }
+// 요청 → AI 계획 → 검토·수정 → 실행 → 결과 중 현재 단계를 표시하고, 실행 제어는 계획이 있을 때만 켠다.
+function renderStepper() {
+  const snapshot = workflowGraph.mode === "workflow" ? workflowGraph.snapshot : null, status = snapshot?.run?.status;
+  const step = !snapshot ? 1 : status === "pending" ? 2 : 3;
+  for (const item of byId("stepper").children) {
+    const number = Number(item.dataset.step);
+    item.className = number < step ? "done" : number === step ? "current" : "";
+    if (number === step) item.setAttribute("aria-current", "step"); else item.removeAttribute("aria-current");
+  }
+  const planned = status === "pending", started = Boolean(snapshot) && !planned;
+  byId("run-button").hidden = started; byId("run-button").disabled = !snapshot && !workflowEditor.plan.tasks.length;
+  byId("workflow-controls").hidden = !started || ["ready", "running"].includes(status) || workflowGraph.mode !== "workflow";
+  for (const button of document.querySelectorAll("[data-workflow-action]")) button.disabled = !snapshot;
+}
+// 실행: 수정한 내용이 있으면 먼저 새 계획으로 저장하고, 계획이 준비되면 실행을 요청한다.
+let starting = false;
+async function startRun() {
+  if (starting) return;
+  starting = true; const button = byId("run-button"); button.disabled = true; button.textContent = "준비 중…";
+  try {
+    let job = jobs.find((item) => item.id === selected);
+    if (workflowEditor.dirty || !job || !workflowGraph.snapshot) {
+      job = await workflowEditor.submit();
+      if (!job) return;
+      for (let waited = 0; waited < 30 && workflowGraph.job === job.id && !workflowGraph.snapshot?.run?.runId; waited++) { await new Promise((resolve) => setTimeout(resolve, 1000)); await workflowGraph.refresh(); }
+      if (!workflowGraph.snapshot?.run?.runId) throw new Error("계획 저장이 끝나지 않았습니다. 잠시 뒤 다시 실행을 눌러 주세요.");
+    }
+    for (let attempt = 0; ; attempt++) {
+      try { await api(`/api/jobs/${encodeURIComponent(job.id)}/workflow/control`, { action: "start" }); break; }
+      catch (error) { if (error.status !== 409 || attempt >= 5) throw error; await new Promise((resolve) => setTimeout(resolve, 1500)); }
+    }
+    notice("실행을 시작했습니다. 단계 상태가 실시간으로 바뀝니다."); workflowGraph.snapshot = null; await refresh();
+  } catch (error) { notice(error.message, true); }
+  finally { starting = false; button.textContent = "실행"; renderStepper(); }
+}
+// AI가 계획을 만드는 동안 진행 상황을, 실패하면 이유와 다시 시도 버튼을 스튜디오에 직접 보여 준다.
+function updatePlanProgress(failure) {
+  const box = byId("plan-progress"), text = byId("plan-progress-text"), retry = byId("plan-retry");
+  if (failure) { box.hidden = false; box.className = "plan-progress failed"; text.textContent = failure; retry.hidden = !lastRequest; return; }
+  if (!autoLoadJob) { if (!box.classList.contains("failed")) box.hidden = true; return; }
+  box.hidden = false; box.className = "plan-progress"; retry.hidden = true;
+  text.textContent = `AI가 단계를 구성하고 있습니다… ${Math.max(0, Math.floor((Date.now() - autoLoadStarted) / 1000))}초 (보통 30~60초)`;
+}
+byId("plan-retry").addEventListener("click", () => {
+  byId("plan-progress").hidden = true; byId("prompt").value = lastRequest; byId("submit-form").requestSubmit(byId("submit"));
+});
+byId("run-button").addEventListener("click", () => { void startRun(); });
+// AI가 계획을 만들면 편집기에 불러와 사용자가 노드를 미세 조정할 수 있게 한다.
+function loadGeneratedPlan() {
+  if (!autoLoadJob || autoLoadJob !== selected) return;
+  const plan = workflowGraph.mode === "workflow" ? workflowGraph.snapshot?.plan : null;
+  if (plan) {
+    autoLoadJob = null; byId("plan-progress").hidden = true; byId("submit-form-status").hidden = true;
+    workflowEditor.loadPlan(plan, "AI가 만든 계획입니다. 단계를 눌러 고치거나 + 로 단계를 추가한 뒤 '실행'을 누르세요.", true);
+    notice("AI가 계획을 만들었습니다. 검토하고 실행하세요.");
+    return;
+  }
+  const job = jobs.find((item) => item.id === autoLoadJob);
+  const ended = job && ["failed", "cancelled", "interrupted"].includes(job.status);
+  // 작업은 끝났는데 계획이 연결되지 않았다면 AI가 올바른 계획을 만들지 못한 것이다.
+  const noPlan = job && job.status === "completed" && !job.workflowRunId;
+  if (ended || noPlan) {
+    autoLoadJob = null; byId("submit-form-status").hidden = true;
+    updatePlanProgress(ended ? "계획을 만들지 못했습니다. 모델 연결이나 설정 문제일 수 있습니다. 잠시 뒤 다시 시도해 주세요." : "AI가 올바른 계획을 만들지 못했습니다. 요청을 더 구체적으로 적어 다시 시도해 주세요.");
+    return;
+  }
+  updatePlanProgress();
+}
 async function refresh() {
   if (!connected || refreshing) return;
   refreshing = true; const version = generation;
   try {
     const nextJobs = await api("/api/jobs");
     if (generation !== version) return;
-    jobs = nextJobs; renderJobs(); renderDetail(); await refreshDetails();
+    jobs = nextJobs; renderJobs(); renderDetail(); await refreshDetails(); loadGeneratedPlan(); workflowEditor.refreshStates(); renderStepper();
     const status = await api("/api/status");
     if (generation === version) {
       const recovered = networkFailed;
@@ -186,8 +262,8 @@ async function refresh() {
 }
 async function connect() {
   const status = await api("/api/status");
-  sessionStorage.setItem("perdixGatewayToken", token);
-  connected = true; byId("login-panel").hidden = true; byId("workspace").hidden = false; byId("disconnect").hidden = false;
+  if (token) sessionStorage.setItem("perdixGatewayToken", token);
+  connected = true; byId("login-panel").hidden = true; byId("workspace").hidden = false; byId("disconnect").hidden = !token;
   byId("project").replaceChildren(...status.projects.map((project) => {
     const option = element("option", project.name); option.value = project.name; return option;
   }));
@@ -208,7 +284,7 @@ byId("login-form").addEventListener("submit", async (event) => {
   finally { button.disabled = false; button.textContent = "연결하기"; }
 });
 for (const [form, path, body] of [
-  ["submit-form", "/api/jobs", () => ({ project: byId("project").value, prompt: byId("prompt").value })],
+  ["submit-form", "/api/jobs", () => ({ project: byId("project").value, prompt: (byId("use-workflow").checked ? "/workflow plan " : "") + byId("prompt").value })],
   ["github-form", "/api/github/import", () => ({ project: byId("project").value, issueNumber: Number(byId("issue").value), instruction: byId("instruction").value })],
 ]) byId(form).addEventListener("submit", async (event) => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
@@ -218,8 +294,8 @@ for (const [form, path, body] of [
   button.textContent = "접수 중…";
   try {
     const job = await api(path, body()); jobs = [job, ...jobs.filter((j) => j.id !== job.id)];
-    if (form === "submit-form") byId("prompt").value = "";
-    await selectJob(job.id); notice("작업을 접수했습니다."); status.textContent = "작업을 접수했습니다.";
+    if (form === "submit-form") { byId("prompt").value = ""; autoLoadJob = byId("use-workflow").checked ? job.id : null; if (autoLoadJob) workflowEditor.clear(); autoLoadStarted = Date.now(); lastRequest = job.prompt.replace(/^\/workflow plan /, ""); updatePlanProgress(); }
+    await selectJob(job.id); notice("작업을 접수했습니다."); status.textContent = form === "submit-form" && autoLoadJob ? "AI가 단계를 구성하고 있습니다. 잠시만 기다리면 아래에 나타납니다." : "작업을 접수했습니다.";
   } catch (error) { notice(error.message, true); status.textContent = error.message; status.className = "small error"; }
   finally { button.disabled = false; button.textContent = buttonLabel; }
 });
@@ -234,6 +310,7 @@ byId("theme").addEventListener("change", () => {
   else document.documentElement.dataset.theme = byId("theme").value;
 });
 setInterval(refresh, 2000);
-if (token) connect().catch((error) => notice(error.message, true));
+// 토큰 없는 로컬 모드 서버면 로그인 화면 없이 바로 연결된다. 토큰이 필요한 서버는 401로 로그인 화면에 남는다.
+connect().catch((error) => { if (token) notice(error.message, true); });
 
 byId("project").addEventListener("change", () => { workflowGraph.setProject(byId("project").value); workflowEditor.setProject(byId("project").value); });
