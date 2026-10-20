@@ -223,7 +223,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 | AGENTS.md | cwd에서 루트까지 상향 + 작업 중인 하위 디렉터리 | 가까운 것이 우선, 전부 병합 |
 | CLAUDE.md | `./CLAUDE.md`, `.claude/CLAUDE.md`, `~/.claude/CLAUDE.md`, `CLAUDE.local.md` | `@path` 임포트 해석 |
 | skills | `.claude/skills/*/SKILL.md`, `.agents/skills/*/SKILL.md`, `~/.claude/skills`, `~/.agents/skills` | frontmatter(name/description)만 시스템 프롬프트에 노출, 본문은 `skill` 도구로 지연 로드 |
-| MCP | ACP `session/new`의 `mcpServers`, `.perdix/config.json`, `.mcp.json`, `.codex/config.toml [mcp_servers]`, 전역(`~/.perdix`, `~/.claude.json`) | 우선순위: ACP > `.perdix` > `.mcp.json` > `.codex` > 전역. 동일 이름은 상위가 덮어쓴다 |
+| MCP | ACP `session/new`의 `mcpServers`, `.perdix/config.json`, `.mcp.json`, `.codex/config.toml [mcp_servers]`, 전역(`~/.perdix`, `~/.claude.json`) | 우선순위: ACP > `.perdix` > `.mcp.json` > `.codex` > 전역. 동일 이름은 상위가 덮어쓴다 (구현된 범위: stdio·tools, ACP > `.mcp.json`(신뢰 시) > `~/.perdix/mcp.json`. [ADR 0034](adr/0034-mcp-client.md), [MCP 사용법](mcp.md)) |
 
 자체 설정은 `.perdix/config.json`(프로젝트) / `~/.perdix/config.json`(전역). AGENTS.md와 CLAUDE.md가 둘 다 있으면 둘 다 읽되 중복 문단은 제거하지 않는다(사용자 책임).
 
