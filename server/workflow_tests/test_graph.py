@@ -10,7 +10,7 @@ from test_worktrees import repository
 from perdix.harness.budget import Budget
 from perdix.harness.events import HarnessEvent, PermissionOutcome, PermissionRequest
 from perdix.harness.hooks import HookBus
-from perdix.harness.modes import CHAT
+from perdix.harness.modes import GENERAL
 from perdix.harness.turn import TurnRunner
 from perdix.llm.fake import FakeProvider
 from perdix.permissions.policy import PermissionPolicy
@@ -113,7 +113,7 @@ async def test_real_harness_parallel_worktrees_and_join(tmp_path: Path) -> None:
         sandbox=worktrees.backend,
         budget=Budget(),
         hooks=HookBus(),
-        mode=CHAT,
+        mode=GENERAL,
         cwd=root,
         model="parent",
         system_prompt_builder=lambda cwd, mode: "",
@@ -129,7 +129,7 @@ async def test_real_harness_parallel_worktrees_and_join(tmp_path: Path) -> None:
             snapshot = await graph.run(current)
         # Then: 합류에는 선행 파일이 있고 원본은 변경되지 않는다.
         assert snapshot.run.status == "completed"
-        assert parent.mode.id == "chat"
+        assert parent.mode.id == "general"
         attempts = {a.task_id: a for a in snapshot.attempts}
         assert len({a.worktree_path for a in attempts.values()}) == 3
         assert attempts["c"].worktree_path is not None
@@ -276,7 +276,7 @@ async def test_child_cannot_control_parent_team_or_mode(tmp_path: Path, read_onl
         sandbox=LocalBackend(),
         budget=Budget(),
         hooks=HookBus(),
-        mode=CHAT,
+        mode=GENERAL,
         cwd=tmp_path,
         model="fake-model",
         system_prompt_builder=lambda cwd, mode: "",

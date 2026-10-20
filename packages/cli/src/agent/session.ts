@@ -16,6 +16,7 @@ import type {
   ModelOption,
   PermissionAnswer,
   PermissionRequest,
+  PromptImage,
   SessionHandle,
   SessionInfo,
   ToolContent,
@@ -68,7 +69,7 @@ export function modelFromConfig(options: SessionConfigOption[] | null | undefine
   const models: ModelOption[] = [];
   for (const entry of opt.options) {
     for (const option of "group" in entry ? entry.options : [entry]) {
-      const provider = option.description?.match(/^provider: (\S+)$/)?.[1];
+      const provider = option.description?.match(/^provider: (\S+)/)?.[1];
       models.push({ value: option.value, name: option.name, ...(provider ? { provider } : {}) });
     }
   }
@@ -238,13 +239,13 @@ export class AgentSession implements SessionHandle {
     };
   }
 
-  async prompt(text: string): Promise<{ stopReason: string; verification?: string | null }> {
+  async prompt(text: string, images: readonly PromptImage[] = []): Promise<{ stopReason: string; verification?: string | null }> {
     const control = /^\/loop(?:\s+(?:status|cancel))?\s*$/.test(text.trim());
     if (!control) this.emit({ type: "turn_started" });
     try {
       const res = await this.agent.request("session/prompt", {
         sessionId: this.sessionId,
-        prompt: [{ type: "text", text }],
+        prompt: [...(text ? [{ type: "text" as const, text }] : []), ...images],
       });
       const raw = perdixMeta(res._meta, "verification");
       const verification =

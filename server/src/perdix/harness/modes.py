@@ -1,4 +1,4 @@
-"""세션 모드: chat, plan, build (m1.md §4)."""
+"""세션 모드: general, plan, build (m1.md §4)."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ class Mode(BaseModel):
     verification: bool
 
 
-CHAT: Final = Mode(
-    id="chat",
-    name="Chat",
+GENERAL: Final = Mode(
+    id="general",
+    name="General",
     description="Answer questions and explore the codebase. Read-only tools only.",
     read_only=True,
     verification=False,
@@ -39,4 +39,4 @@ BUILD: Final = Mode(
     verification=True,
 )
 
-MODES: Final[dict[str, Mode]] = {m.id: m for m in (CHAT, PLAN, BUILD)}
+MODES: Final[dict[str, Mode]] = {m.id: m for m in (GENERAL, PLAN, BUILD)}

@@ -14,10 +14,10 @@ node packages/cli/dist/main.js --tui hermes --cwd /작업/프로젝트
 개발 실행은 `pnpm --filter perdix dev --tui hermes`이다.
 기존 공급자 인증과 `--model`, `--mode`, `--server` 설정을 사용한다.
 메인 모델은 요청 의도에 따라 `switch_mode`로 모드를 자동 전환한다. 질문·조사는
-`chat`, 계획만 요청하면 `plan`, 구현·수정·실행은 `build`다. 전환은 현재 작업부터
+`general`, 계획만 요청하면 `plan`, 구현·수정·실행은 `build`다. 전환은 현재 작업부터
 반영되고 화면에도 전달된다. 쓰기·실행의 기존 권한 승인은 유지한다.
 수동 모드는 시작 모드를 정하며, 다음 요청에서는 의도에 따라 다시 바뀔 수 있다.
-`~/.perdix/agents.json`의 `agents.chat`, `agents.plan`, `agents.build`를 지정하면 모드 전환과
+`~/.perdix/agents.json`의 `agents.general`, `agents.plan`, `agents.build`를 지정하면 모드 전환과
 함께 모델·effort도 바뀐다. 사용자 설정 폴더의 파일을 자동으로 읽으며
 다른 경로는 서버 옵션 `--agents-config`로 지정한다. 설정 변경 후 재시작한다.
 `--resume <세션ID>`로 기존 대화를 복원할 수 있고, `--list`로 ID를 확인한다.
@@ -35,13 +35,14 @@ node packages/cli/dist/main.js --tui hermes --cwd /작업/프로젝트
 | `/login [openai\|anthropic]` | 공급자 선택 후 기존 브라우저 인증 실행; 완료 후 서버 재연결 |
 | `/logout [openai\|anthropic]` | 기존 인증 해제 후 서버 재연결 |
 | `/auth status [openai\|anthropic]` | 현재 인증 상태 표시 |
-| `/agent`, `/mode` | 현재 모드 조회; `chat`, `plan`, `build`로 변경 |
+| `/agent`, `/mode` | 현재 모드 조회; `general`, `plan`, `build`로 변경 |
 | `/model` | 서버가 제공한 모델 선택; 현재 세션에 적용 |
 | `/new`, `/clear` | 확인 후 새 대화 시작; 기존 기록 보존 |
 | `/sessions`, `/resume [ID]` | 저장된 세션 선택·복원 |
 | `/status` | 실제 세션·모델·모드·작업 상태 표시 |
 | `/usage` | ACP가 보고한 컨텍스트 사용량·비용; 없는 통계는 미제공으로 안내 |
 | `/cancel`, `/stop` | Perdix 작업 취소 요청 |
+| `/image <경로>` | 이미지 파일을 다음 메시지에 첨부 |
 | `/memories` | 메모리 상태·`use on/off`, `generate on/off`를 서버에 전달 |
 | `/loop [목표]`, `/loop status`, `/loop cancel` | 목표 루프 요청·조회·취소; 실행에는 기존 프로젝트 신뢰·검증 설정 필요 |
 | `/save` | 자동 저장·세션 복원 안내; 별도 파일 내보내기는 하지 않음 |
@@ -56,6 +57,17 @@ node packages/cli/dist/main.js --tui hermes --cwd /작업/프로젝트
 외부 터미널의 `perdix auth login --provider openai`도 사용할 수 있다.
 Hermes의 `/yolo`, `/undo`, `/compress`, `/branch`처럼 실행 권한이나 기록 의미가
 다른 기능은 이번 호환 목록에 넣지 않는다.
+
+이미지는 `/image <경로>`, 파일 드래그앤드롭, 스크린샷의 `⌘+V`로 첨부한다.
+macOS 기본 Terminal에서는 Perdix가 실행되는 동안 이미지 전용 클립보드에 임시 파일 URL을
+텍스트 표현으로 함께 제공한다. Terminal의 기본 붙여넣기가 이 경로를 전달하면 즉시 이미지로 첨부된다.
+원본 이미지 표현을 유지하며 다른 앱으로 전환하거나 Perdix를 종료하면 추가한 표현을 복원한다.
+새로 복사한 내용은 덮어쓰지 않는다. SSH와 다른 터미널에는 이 보조 처리를 적용하지 않는다.
+입력창의 `[[ Image N ]]` 토큰을 지우면 첨부도 제거된다. 설명 없이 이미지만 보낼 수도 있다.
+PNG·JPEG·GIF·WebP를 파일당 5 MiB, 메시지당 4장까지 지원한다. 이미지 입력을 지원하는 모델을 선택한다.
+클립보드 단축키는 macOS·Windows의 기본 도구와 Linux의 `wl-paste` 또는 `xclip`을 사용한다.
+클립보드를 읽을 수 없는 환경에서는 파일 경로로 첨부한다.
+이미지 바이트는 ACP 표준 `session/prompt`의 이미지 블록으로 전달하며 전송 후 첨부 대기 목록을 비운다.
 
 Hermes 원본의 영어 문구와 메뉴 일부는 남아 있다. 음성·결제·Hermes 플러그인·
 상세 설정은 연결하지 않았으며 기능 플래그로 비활성화한다.

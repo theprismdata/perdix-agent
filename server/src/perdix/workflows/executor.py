@@ -42,7 +42,7 @@ async def harness_prompt(
     sandbox: ExecBackend | None = None,
 ) -> HarnessOutcome:
     """독립 대화 기록을 만들되 부모 취소·권한·공급자 계약을 상속한다."""
-    factory = parent.compactor_factory
+    factory = parent.provider_factory or parent.compactor_factory
     if model != parent.model and factory is None:
         raise RuntimeError("워크플로 모델 공급자 factory가 필요합니다")
     provider = factory(model) if factory is not None else parent.provider
@@ -61,6 +61,9 @@ async def harness_prompt(
         and (tool := parent._base_registry.get(name)) is not None
     )
     record = await parent.store.create_session(str(cwd), mode.id, provider.name, model)
+    for name, selected in parent.auth_profiles.items():
+        await parent.store.append(record.id, "config_change",
+                                  {"key": "auth_profile_" + name, "value": selected})
     runner = TurnRunner(
         store=parent.store,
         provider=provider,
@@ -76,7 +79,7 @@ async def harness_prompt(
         max_tokens=parent.max_tokens,
         effort=parent.effort,
         agents_config=parent.agents_config,
-        compactor_factory=factory,
+        compactor_factory=parent.compactor_factory,
         before_provider=context.reserve_step if context else None,
         before_tool=context.check_owner if context else None,
     )

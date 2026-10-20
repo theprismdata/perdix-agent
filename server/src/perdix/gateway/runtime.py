@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from perdix.gateway.config import GatewayConfig
 from perdix.gateway.events import GatewayStore, Job
+from perdix.llm import catalog
 from perdix.sandbox.base import scrub_env
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,11 @@ class JobClient(Client):
         data: JsonValue = json.loads(update.model_dump_json(by_alias=True, exclude_none=True))
         await self.gateway.store.append(self.job_id, "update", data)
         metadata = update.field_meta or {}
-        workflow = metadata.get("perdix", {}).get("workflow", {})
+        job = await self.gateway.store.get(self.job_id)
+        workflow = (
+            metadata.get("perdix", {}).get("workflow", {})
+            if job and job.agent == "perdix" else {}
+        )
         run_id = workflow.get("runId")
         if isinstance(run_id, str) and run_id:
             await self.gateway.store.bind_workflow(self.job_id, session_id, run_id)
@@ -201,6 +206,14 @@ class GatewayRuntime:
                     return job
             if len(self.tasks) >= 100:
                 raise ValueError("작업 대기열이 가득 찼습니다")
+            project = self.config.projects[request.project]
+            agent_identity = project.acp.identity if project.acp else "perdix"
+            selected_model = None
+            if source == "telegram" and source_id and not project.acp:
+                conversation = source_id.rsplit(":", 1)[0]
+                selected_model = await self.store.selected_model(
+                    f"{conversation}:{request.project}:{agent_identity}",
+                )
             job = Job(
                 id=str(uuid4()),
                 project=request.project,
@@ -208,6 +221,8 @@ class GatewayRuntime:
                 source=source,
                 source_id=source_id,
                 created_at=time.time(),
+                agent=agent_identity,
+                model=selected_model,
             )
             await self.store.append(job.id, "submitted", job.model_dump(mode="json"), source_id)
             self.task_projects[job.id] = job.project
@@ -219,6 +234,8 @@ class GatewayRuntime:
             job = await self.store.get(job_id)
             if job is None or job.workflow_run_id is None or job.session_id is None:
                 raise ValueError("워크플로에 연결된 작업이 아닙니다")
+            if job.agent != "perdix" or self.config.projects[job.project].acp:
+                raise ValueError("외부 ACP 에이전트는 Perdix 워크플로 제어를 지원하지 않습니다")
             if action not in {"start", "resume", "retry", "accept", "reject"}:
                 raise ValueError("지원하지 않는 제어 명령입니다")
             if action == "retry" and not task_id:
@@ -242,15 +259,31 @@ class GatewayRuntime:
         reconnect = False
         try:
             async with self.project_locks[job.project], self.limit:
+                if not job.session_id and job.source == "telegram" and job.source_id:
+                    conversation = job.source_id.rsplit(":", 1)[0] + ":"
+                    previous = next((
+                        item for item in await self.store.jobs()
+                        if item.id != job.id and item.source == "telegram"
+                        and item.project == job.project and item.source_id
+                        and item.agent == job.agent
+                        and item.source_id.startswith(conversation) and item.session_id
+                        and item.workflow_run_id is None
+                    ), None)
+                    if previous is not None:
+                        job = job.model_copy(update={"session_id": previous.session_id})
                 project = self.config.projects[job.project]
                 server = self.config.server
+                model = job.model or server.model
+                provider = catalog.get(model).provider if job.model else server.provider
+                if server.provider == "fake":
+                    provider = "fake"
                 args = [
                     "-m",
                     "perdix",
                     "--provider",
-                    server.provider,
+                    provider,
                     "--model",
-                    server.model,
+                    model,
                     "--db",
                     str(os.path.abspath(server.db_path)),
                     "--credentials",
@@ -269,6 +302,11 @@ class GatewayRuntime:
                     args.extend(["--agents-config", str(server.agents_config_path.resolve())])
                 if project.trust_project:
                     args.append("--trust-project")
+                command = sys.executable
+                mode: str | None = "build"
+                if project.acp:
+                    command, *args = project.acp.command
+                    mode = project.acp.mode
                 env = scrub_env(os.environ)
                 for key in (
                     self.config.token_env,
@@ -283,23 +321,31 @@ class GatewayRuntime:
                     process = AsyncExitStack()
                     self.processes[job.id] = process
                     conn, _ = await process.enter_async_context(spawn_agent_process(
-                        client, sys.executable, *args, env=env, cwd=project.cwd,
+                        client, command, *args, env=env, cwd=project.cwd,
                         transport_kwargs={"stderr": None}, use_unstable_protocol=True,
                     ))
                     async with asyncio.timeout(30):
-                        await conn.initialize(protocol_version=PROTOCOL_VERSION,
-                                              client_capabilities=ClientCapabilities())
-                        if job.session_id:
+                        initialized = await conn.initialize(
+                            protocol_version=PROTOCOL_VERSION,
+                            client_capabilities=ClientCapabilities(),
+                        )
+                        capabilities = initialized.agent_capabilities
+                        if job.session_id and capabilities and capabilities.load_session:
                             await conn.load_session(session_id=job.session_id,
                                                     cwd=str(project.cwd), mcp_servers=[])
                             session_id = job.session_id
                         else:
                             session = await conn.new_session(cwd=str(project.cwd), mcp_servers=[])
                             session_id = session.session_id
-                            await conn.set_session_mode(session_id=session_id, mode_id="build")
+                            if mode is not None:
+                                await conn.set_session_mode(session_id=session_id, mode_id=mode)
                     self.connections[job.id] = (conn, session_id)
                 else:
                     conn, session_id = connection
+                if job.model and not project.acp:
+                    await conn.set_config_option(
+                        config_id="model", session_id=session_id, value=job.model,
+                    )
                 await self.store.append(
                     job.id,
                     "state",
@@ -308,6 +354,7 @@ class GatewayRuntime:
                         "session_id": session_id,
                     },
                 )
+                client.text.clear()
                 response = await conn.prompt(
                     session_id=session_id, prompt=[text_block(control_prompt or job.prompt)]
                 )

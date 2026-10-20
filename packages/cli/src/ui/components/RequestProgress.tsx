@@ -4,7 +4,7 @@ import type { State } from "../state.js";
 import { theme } from "../theme.js";
 
 export function requestPhase(state: State, permissionTitle?: string): string {
-  if (!state.running) return state.result?.split(/ · |\n/)[0] ?? (state.mode === "chat" || state.mode === "plan"
+  if (!state.running) return state.result?.split(/ · |\n/)[0] ?? (state.mode === "general" || state.mode === "plan"
     ? "준비됨 · 읽기 전용 모드 · 변경 작업은 /agent build"
     : "준비됨");
   if (permissionTitle) return `승인 대기 · ${permissionTitle}`;

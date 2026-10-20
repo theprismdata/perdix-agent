@@ -126,7 +126,7 @@ export function submitPrompt(
         return startSubmit(text, deps.expand(text), showUserMessage)
       }
 
-      startSubmit(r.text || text, deps.expand(r.text || text), showUserMessage)
+      startSubmit(r.text ?? text, deps.expand(r.text ?? text), showUserMessage)
     })
     .catch(() => startSubmit(text, deps.expand(text), showUserMessage))
 }

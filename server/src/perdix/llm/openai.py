@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import openai
-from openai.types.responses import ResponseOutputItem
+from openai.types.responses import ResponseOutputItem, ResponseUsage
 
 from perdix.context.messages import (
     AssistantItem,
@@ -161,6 +161,19 @@ def map_exception(exc: Exception) -> ProviderError:
     return ProviderError(str(exc), retryable=False, status=None)
 
 
+def _map_usage(raw: ResponseUsage | None) -> Usage:
+    if raw is None:
+        return Usage()
+    cache_read = raw.input_tokens_details.cached_tokens or 0
+    cache_write = raw.input_tokens_details.cache_write_tokens or 0
+    return Usage(
+        input_tokens=raw.input_tokens + cache_read + cache_write,
+        output_tokens=raw.output_tokens,
+        cache_read=cache_read,
+        cache_write=cache_write,
+    )
+
+
 def _message_items(item: Any) -> list[AssistantItem]:
     items: list[AssistantItem] = []
     for part in item.content:
@@ -181,11 +194,13 @@ class OpenAIProvider:
         *,
         api_key: str | None = None,
         credentials_path: Path | None = None,
+        use_environment: bool = True,
     ) -> None:
         self.model = model
         self._client = client
         self._api_key = api_key
         self._credentials_path = credentials_path
+        self._use_environment = use_environment
 
     @property
     def client(self) -> openai.AsyncOpenAI:
@@ -202,7 +217,9 @@ class OpenAIProvider:
         from perdix.llm.openai_credentials import oauth_path
         from perdix.llm.openai_oauth import OpenAiOAuth
 
-        key = self._api_key or load_credentials(self._credentials_path).api_key("openai")
+        key = self._api_key or load_credentials(self._credentials_path).api_key(
+            "openai", env=None if self._use_environment else {},
+        )
         if self._client is not None:
             async for event in self._stream(req, self._client, chatgpt=False):
                 yield event
@@ -235,7 +252,6 @@ class OpenAIProvider:
                     "description": "프로젝트 파일 조회·수정 및 명령 실행을 위한 Perdix 도구",
                     "tools": tools,
                 }]
-        usage = Usage()
         # function_call 아이템의 Responses 내부 item_id → 우리가 쓰는 id(call_id) 매핑.
         # delta/done 이벤트는 item_id만 주고 call_id는 output_item.added에서만 온다.
         call_ids: dict[str, str] = {}
@@ -285,14 +301,7 @@ class OpenAIProvider:
         if response is None:
             raise ProviderError("stream ended without a final response event", retryable=True)
 
-        u = response.usage
-        if u is not None:
-            usage.input_tokens = u.input_tokens
-            usage.output_tokens = u.output_tokens
-            usage.cache_read = u.input_tokens_details.cached_tokens
-            usage.cache_write = u.input_tokens_details.cache_write_tokens
-        usage.input_tokens += usage.cache_read + usage.cache_write
-        yield usage
+        yield _map_usage(response.usage)
 
         if response.status == "failed":
             detail = response.error.message if response.error is not None else "unknown error"

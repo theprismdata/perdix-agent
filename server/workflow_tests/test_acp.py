@@ -162,7 +162,7 @@ async def test_stdio_start_accept_verifies_candidate_before_changing_head(tmp_pa
         bound = await runtime.store.get(job.id)
         assert bound is not None and bound.workflow_run_id
         conn = runtime.connections[job.id]
-        await conn[0].set_session_mode(session_id=conn[1], mode_id="chat")
+        await conn[0].set_session_mode(session_id=conn[1], mode_id="general")
         await runtime.control(job.id, "start")
         with pytest.raises(WorkflowBusyError):
             await runtime.control(job.id, "start")
@@ -182,7 +182,7 @@ async def test_stdio_start_accept_verifies_candidate_before_changing_head(tmp_pa
                               check=True, capture_output=True, text=True).stdout.strip()
         assert head == accepted.run.candidate_commit
         loaded = await conn[0].load_session(session_id=conn[1], cwd=str(root), mcp_servers=[])
-        assert loaded.modes is not None and loaded.modes.current_mode_id == "chat"
+        assert loaded.modes is not None and loaded.modes.current_mode_id == "general"
     finally:
         await record(runtime, "stdio-" + tmp_path.name)
         await runtime.close()

@@ -1,379 +1,347 @@
 # Perdix Agent
 
+터미널과 VS Code에서 사용할 수 있는 AI 코딩 에이전트입니다.
+코드 탐색부터 구현, 테스트, 리뷰까지 자연어로 요청할 수 있습니다.
+
 ![Perdix CLI — 터미널 대화 화면](docs/images/perdix-cli.png)
 
-터미널(TUI)과 VS Code에서 동작하는 코딩 에이전트.
-Python 에이전트 코어 하나를 TypeScript 클라이언트가 [ACP](https://agentclientprotocol.com)로 구동한다.
+## 소개
 
-- 설계: [docs/architecture.md](docs/architecture.md)
-- 하네스 루프: [docs/harness-loop.md](docs/harness-loop.md)
-- 슬래시 목표 루프: [docs/goal-loop.md](docs/goal-loop.md)
-- 여러 터미널의 에이전트 팀: [docs/terminal-teams.md](docs/terminal-teams.md)
-- OpenAI API 키 / ChatGPT 로그인: [docs/openai-auth.md](docs/openai-auth.md)
-- 프로토콜: [docs/protocol.md](docs/protocol.md)
-- 결정 기록: [docs/adr/](docs/adr/)
-- 에이전트 작업 지침: [AGENTS.md](AGENTS.md)
+- **코드 탐색과 수정**: 프로젝트 구조를 분석하고 코드를 작성·검증합니다.
+- **작업 모드**: 대화(`general`), 계획(`plan`), 구현(`build`) 모드를 제공합니다.
+- **여러 모델 지원**: Anthropic, OpenAI, Gemini, OpenRouter를 사용할 수 있습니다.
+- **에이전트 협업**: 역할별 하위 에이전트와 팀 워크플로로 작업을 나눌 수 있습니다.
+- **터미널과 에디터 연동**: CLI, VS Code 확장, ACP 클라이언트에서 사용할 수 있습니다.
+- **텔레그램 연동**: 메신저에서 작업을 요청하고 Perdix의 답변을 받을 수 있습니다.
 
-현재 상태: Python 코어(이벤트 로그, 하네스 루프, Anthropic 어댑터, 내장 도구, 권한, 샌드박스)와 헤드리스 ACP stdio 서버(M1), 터미널 UI `perdix`(M2)가 동작한다. 구현 순서는 architecture.md 9절, 단계별 스펙은 docs/impl/ 참조.
+### 지원 모델
+
+2026-10-19 기준 기본 카탈로그에 **총 416개 모델**이 등록되어 있습니다.
+직접 연결 모델 10개(Anthropic 5개, OpenAI 3개, Gemini 2개), 로컬 Ollama 모델
+6개와 OpenRouter 모델 400개입니다.
+클라우드 모델 호출에는 해당 제공자의 인증과 사용 권한·잔액이 필요합니다.
+
+#### 직접 연결 모델
+
+| 제공자 | 모델 ID |
+|---|---|
+| Anthropic | `claude-fable-5-1`, `claude-opus-5-5`, `claude-sonnet-5-5`, `claude-haiku-5-5`, `claude-haiku-4-5` |
+| OpenAI | `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-luna` |
+| Google Gemini | `gemini-4-argon`, `gemini-3.8-flash` |
+| Ollama | `qwen3:4b`, `qwen3:8b`, `qwen3:14b`, `gpt-oss:20b`, `gemma3:4b`, `gemma3:12b` |
+
+#### 주요 OpenRouter 모델
+
+OpenRouter API 키 하나로 다음 모델들을 선택할 수 있습니다. 아래는 전체 목록에서
+주요 모델군을 찾기 위한 예시이며, 나머지 등록 모델도 아래 펼침 목록에서 확인할 수 있습니다.
+
+| 모델군 | 선택할 수 있는 모델 ID 예시 |
+|---|---|
+| DeepSeek | `deepseek/deepseek-v4.1-flash`, `deepseek/deepseek-v4.1-flash-1017` |
+| Kimi | `moonshotai/kimi-k3`, `moonshotai/kimi-k2.7-code` |
+| GLM | `z-ai/glm-5.3`, `z-ai/glm-5.3-flash` |
+| Qwen | `qwen/qwen3.8-flash`, `qwen/qwen3-coder-flash` |
+| MiniMax | `minimax/minimax-m3`, `minimax/minimax-m2.7` |
+| Claude | `anthropic/claude-fable-5.1`, `anthropic/claude-opus-5.5`, `anthropic/claude-sonnet-5.5`, `anthropic/claude-haiku-5.5` |
+| GPT | `openai/gpt-6.1-sol`, `openai/gpt-6-astra`, `openai/gpt-6-luna` |
+| Gemini | `google/gemini-4-argon`, `google/gemini-3.8-flash` |
+
+#### 모델 선택 방법
+
+- **CLI·VS Code**: `/model` 또는 모델 선택 메뉴에서 고릅니다.
+- **Telegram**: `/model`을 보낸 뒤 **모델 종류 → 원하는 모델 버튼**을 누릅니다.
+  이전·다음 버튼으로 목록을 이동할 수 있어 모델 ID를 직접 입력할 필요가 없습니다.
+- **역할별 할당**: Hermes TUI의 `/assign`에서 에이전트 역할과 모델을 선택합니다.
+
+Telegram에서 선택한 모델은 다음 요청부터 적용됩니다. 본인의 채팅·프로젝트별로
+선택이 저장되며 모델을 바꿔도 이전 대화는 유지됩니다.
+
+#### OpenRouter 전체 목록
+
+OpenRouter는 공식 API에서 확인한 **텍스트 출력·도구 호출 지원 모델 400개**를 기본 목록에 포함합니다.
+2026-10-18 기준 스냅샷이며 `/model`과 모델 선택 메뉴에서 바로 고를 수 있습니다.
+Hermes TUI의 `/assign`에서는 원격 모델 목록을 다시 조회해 역할별로 할당할 수도 있습니다.
+제공 목록·가격·계정별 접근 권한은 변경될 수 있습니다.
+출처: [OpenRouter 모델 API](https://openrouter.ai/api/v1/models).
+
+<details>
+<summary>OpenRouter 모델 전체 보기 (400개)</summary>
+
+| 제공사 | 모델 ID |
+|---|---|
+| aion-labs | `aion-labs/aion-2.0`, `aion-labs/aion-3.0`, `aion-labs/aion-3.0-mini`, `aion-labs/aion-3.5`, `aion-labs/aion-3.5-mini` |
+| amazon | `amazon/nova-2-lite-v1`, `amazon/nova-lite-v1`, `amazon/nova-micro-v1`, `amazon/nova-premier-v1`, `amazon/nova-pro-v1` |
+| anthropic | `anthropic/claude-fable-5`, `anthropic/claude-fable-5.1`, `anthropic/claude-fable-5.1:batch`, `anthropic/claude-fable-5:batch`, `anthropic/claude-haiku-4.5`, `anthropic/claude-haiku-4.5:batch`, `anthropic/claude-haiku-5.5`, `anthropic/claude-haiku-5.5:batch`, `anthropic/claude-opus-4.1`, `anthropic/claude-opus-4.1:batch`, `anthropic/claude-opus-4.5`, `anthropic/claude-opus-4.5:batch`, `anthropic/claude-opus-4.6`, `anthropic/claude-opus-4.6:batch`, `anthropic/claude-opus-4.7`, `anthropic/claude-opus-4.7:batch`, `anthropic/claude-opus-4.8`, `anthropic/claude-opus-4.8:batch`, `anthropic/claude-opus-5`, `anthropic/claude-opus-5.5`, `anthropic/claude-opus-5.5:batch`, `anthropic/claude-opus-5:batch`, `anthropic/claude-sonnet-4.5`, `anthropic/claude-sonnet-4.5:batch`, `anthropic/claude-sonnet-4.6`, `anthropic/claude-sonnet-4.6:batch`, `anthropic/claude-sonnet-5`, `anthropic/claude-sonnet-5.5`, `anthropic/claude-sonnet-5.5:batch`, `anthropic/claude-sonnet-5:batch`, `~anthropic/claude-fable-latest`, `~anthropic/claude-haiku-latest`, `~anthropic/claude-opus-latest`, `~anthropic/claude-sonnet-latest` |
+| arcee-ai | `arcee-ai/trinity-large-thinking` |
+| bytedance-seed | `bytedance-seed/seed-1.6`, `bytedance-seed/seed-1.6-flash`, `bytedance-seed/seed-2-1-turbo`, `bytedance-seed/seed-2.0-code`, `bytedance-seed/seed-2.0-lite`, `bytedance-seed/seed-2.0-mini` |
+| cohere | `cohere/command-a-plus`, `cohere/command-r-08-2024`, `cohere/command-r-plus-08-2024`, `cohere/north-mini-code:free` |
+| deepseek | `deepseek/deepseek-chat`, `deepseek/deepseek-chat-v3-0324`, `deepseek/deepseek-chat-v3.1`, `deepseek/deepseek-r1`, `deepseek/deepseek-r1-0528`, `deepseek/deepseek-v3.1-terminus`, `deepseek/deepseek-v3.2`, `deepseek/deepseek-v3.2-exp`, `deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4-flash-0731`, `deepseek/deepseek-v4-flash-vision-exp`, `deepseek/deepseek-v4-pro`, `deepseek/deepseek-v4-pro-0813`, `deepseek/deepseek-v4.1-flash`, `deepseek/deepseek-v4.1-flash-1017`, `deepseek/deepseek-v4.1-flash:batch`, `~deepseek/deepseek-flash-latest`, `~deepseek/deepseek-pro-latest`, `~deepseek/deepseek-v4-flash-latest` |
+| dots-studio | `dots-studio/dots-3-note-preview:free` |
+| elorian | `elorian/glimpse` |
+| fireworks | `fireworks/ember-1` |
+| google | `google/gemini-2.5-flash`, `google/gemini-2.5-flash-lite`, `google/gemini-2.5-flash-lite:batch`, `google/gemini-2.5-flash:batch`, `google/gemini-2.5-pro`, `google/gemini-2.5-pro-preview`, `google/gemini-2.5-pro:batch`, `google/gemini-3-flash-preview`, `google/gemini-3-flash-preview:batch`, `google/gemini-3-pro-image`, `google/gemini-3.1-flash-lite`, `google/gemini-3.1-flash-lite-preview`, `google/gemini-3.1-flash-lite:batch`, `google/gemini-3.1-pro-preview`, `google/gemini-3.1-pro-preview-customtools`, `google/gemini-3.1-pro-preview:batch`, `google/gemini-3.5-flash`, `google/gemini-3.5-flash-lite`, `google/gemini-3.5-flash-lite:batch`, `google/gemini-3.5-flash:batch`, `google/gemini-3.6-flash`, `google/gemini-3.6-flash:batch`, `google/gemini-3.7-flash`, `google/gemini-3.7-flash:batch`, `google/gemini-3.8-flash`, `google/gemini-3.8-flash:batch`, `google/gemini-4-argon`, `google/gemini-4-argon:batch`, `google/gemini-nano-banana-2.1`, `google/gemma-3-12b-it`, `google/gemma-3-27b-it`, `google/gemma-4-26b-a4b-it`, `google/gemma-4-26b-a4b-it:free`, `google/gemma-4-31b-it`, `google/gemma-4-31b-it:free`, `~google/gemini-flash-latest`, `~google/gemini-pro-latest` |
+| ibm-granite | `ibm-granite/granite-4.2-8b` |
+| inception | `inception/mercury-2`, `inception/mercury-2.5` |
+| inclusionai | `inclusionai/ling-3.0-flash`, `inclusionai/ling-3.0-flash-vl`, `inclusionai/ling-3.1-flash` |
+| liquid | `liquid/lfm-2.5-2.6b:free`, `liquid/lfm-2.5-24b-a2b` |
+| meituan | `meituan/longcat-2.0` |
+| meta | `meta/muse-glimmer-30b`, `meta/muse-spark-1.1`, `meta/muse-spark-1.2`, `meta/muse-spark-1.2-contributor`, `meta/muse-spark-1.3`, `meta/muse-spark-1.3-contributor`, `meta/muse-spark-open`, `meta/muse-wonder` |
+| meta-llama | `meta-llama/llama-3.1-70b-instruct`, `meta-llama/llama-3.1-8b-instruct`, `meta-llama/llama-3.3-70b-instruct`, `meta-llama/llama-4-maverick`, `meta-llama/llama-4-scout` |
+| minimax | `minimax/minimax-m1`, `minimax/minimax-m2`, `minimax/minimax-m2.1`, `minimax/minimax-m2.5`, `minimax/minimax-m2.7`, `minimax/minimax-m3` |
+| mistralai | `mistralai/codestral-2508`, `mistralai/codestral-2508:batch`, `mistralai/devstral-2512`, `mistralai/ministral-14b-2512`, `mistralai/ministral-3b-2512`, `mistralai/ministral-8b-2512`, `mistralai/ministral-8b-2512:batch`, `mistralai/mistral-large`, `mistralai/mistral-large-2407`, `mistralai/mistral-large-2512`, `mistralai/mistral-large-2512:batch`, `mistralai/mistral-large-4-0`, `mistralai/mistral-medium-3`, `mistralai/mistral-medium-3-5`, `mistralai/mistral-medium-3-5:batch`, `mistralai/mistral-medium-3.1`, `mistralai/mistral-medium-3.1:batch`, `mistralai/mistral-nemo`, `mistralai/mistral-saba`, `mistralai/mistral-small-2603`, `mistralai/mistral-small-2603:batch`, `mistralai/mistral-small-3.1-24b-instruct`, `mistralai/mistral-small-3.2-24b-instruct`, `mistralai/mixtral-8x22b-instruct`, `mistralai/voxtral-small-24b-2507` |
+| moonshotai | `moonshotai/kimi-k2`, `moonshotai/kimi-k2-0905`, `moonshotai/kimi-k2-thinking`, `moonshotai/kimi-k2.5`, `moonshotai/kimi-k2.6`, `moonshotai/kimi-k2.7-code`, `moonshotai/kimi-k3`, `moonshotai/kimi-k3:batch`, `~moonshotai/kimi-latest` |
+| nex-agi | `nex-agi/nex-n2.5-pro` |
+| nvidia | `nvidia/nemotron-3-nano-30b-a3b`, `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`, `nvidia/nemotron-3-super-120b-a12b`, `nvidia/nemotron-3-super-120b-a12b:free`, `nvidia/nemotron-3-ultra-550b-a55b`, `nvidia/nemotron-3-ultra-550b-a55b:free`, `nvidia/nemotron-3.5-lightning`, `nvidia/nemotron-3.5-lightning:free`, `nvidia/nemotron-3.5-super-vl`, `nvidia/nemotron-3.5-super-vl:free` |
+| openai | `openai/gpt-3.5-turbo`, `openai/gpt-3.5-turbo-0613`, `openai/gpt-3.5-turbo-16k`, `openai/gpt-3.5-turbo:batch`, `openai/gpt-4`, `openai/gpt-4-turbo`, `openai/gpt-4-turbo:batch`, `openai/gpt-4.1`, `openai/gpt-4.1-mini`, `openai/gpt-4.1-mini:batch`, `openai/gpt-4.1-nano`, `openai/gpt-4.1-nano:batch`, `openai/gpt-4.1:batch`, `openai/gpt-4o`, `openai/gpt-4o-2024-05-13`, `openai/gpt-4o-2024-08-06`, `openai/gpt-4o-2024-11-20`, `openai/gpt-4o-mini`, `openai/gpt-4o-mini-2024-07-18`, `openai/gpt-4o-mini:batch`, `openai/gpt-4o:batch`, `openai/gpt-5`, `openai/gpt-5-mini`, `openai/gpt-5-mini:batch`, `openai/gpt-5-nano`, `openai/gpt-5-nano:batch`, `openai/gpt-5-pro`, `openai/gpt-5-pro:batch`, `openai/gpt-5.1`, `openai/gpt-5.1-codex`, `openai/gpt-5.1-codex-max`, `openai/gpt-5.1-codex-mini`, `openai/gpt-5.1:batch`, `openai/gpt-5.2`, `openai/gpt-5.2-chat`, `openai/gpt-5.2-codex`, `openai/gpt-5.2-pro`, `openai/gpt-5.2-pro:batch`, `openai/gpt-5.2:batch`, `openai/gpt-5.3-codex`, `openai/gpt-5.4`, `openai/gpt-5.4-mini`, `openai/gpt-5.4-mini:batch`, `openai/gpt-5.4-nano`, `openai/gpt-5.4-nano:batch`, `openai/gpt-5.4-pro`, `openai/gpt-5.4-pro:batch`, `openai/gpt-5.4:batch`, `openai/gpt-5.5`, `openai/gpt-5.5-pro`, `openai/gpt-5.5-pro:batch`, `openai/gpt-5.5:batch`, `openai/gpt-5.6-luna`, `openai/gpt-5.6-luna-pro`, `openai/gpt-5.6-luna-pro:batch`, `openai/gpt-5.6-luna:batch`, `openai/gpt-5.6-sol`, `openai/gpt-5.6-sol-pro`, `openai/gpt-5.6-sol-pro:batch`, `openai/gpt-5.6-sol:batch`, `openai/gpt-5.6-terra`, `openai/gpt-5.6-terra-pro`, `openai/gpt-5.6-terra-pro:batch`, `openai/gpt-5.6-terra:batch`, `openai/gpt-5:batch`, `openai/gpt-6-astra`, `openai/gpt-6-astra-pro`, `openai/gpt-6-astra-pro:batch`, `openai/gpt-6-astra:batch`, `openai/gpt-6-luna`, `openai/gpt-6-luna-pro`, `openai/gpt-6-luna-pro:batch`, `openai/gpt-6-luna:batch`, `openai/gpt-6-sol`, `openai/gpt-6-sol-pro`, `openai/gpt-6-sol-pro:batch`, `openai/gpt-6-sol:batch`, `openai/gpt-6.1-sol`, `openai/gpt-6.1-sol-pro`, `openai/gpt-6.1-sol-pro:batch`, `openai/gpt-6.1-sol:batch`, `openai/gpt-audio`, `openai/gpt-audio-mini`, `openai/gpt-chat-latest`, `openai/gpt-oss-120b`, `openai/gpt-oss-120b:batch`, `openai/gpt-oss-20b`, `openai/gpt-oss-20b:batch`, `openai/gpt-oss-safeguard-20b`, `openai/o1`, `openai/o3`, `openai/o3-mini`, `openai/o3-mini-high`, `openai/o3-mini:batch`, `openai/o3-pro`, `openai/o3:batch`, `openai/o4-mini`, `openai/o4-mini-high`, `openai/o4-mini:batch`, `~openai/gpt-astra-latest`, `~openai/gpt-luna-latest`, `~openai/gpt-mini-latest`, `~openai/gpt-sol-latest`, `~openai/gpt-terra-latest` |
+| openrouter | `openrouter/auto`, `openrouter/auto-beta`, `openrouter/free`, `openrouter/pareto-code` |
+| perceptron | `perceptron/perceptron-mk1.5` |
+| poolside | `poolside/laguna-s-2.1`, `poolside/laguna-s-2.1:free`, `poolside/laguna-xs-2.1`, `poolside/laguna-xs-2.1:free` |
+| prism-ml | `prism-ml/ternary-bonsai-2-27b` |
+| qwen | `qwen/qwen-2.5-72b-instruct`, `qwen/qwen-2.5-7b-instruct`, `qwen/qwen-plus`, `qwen/qwen3-14b`, `qwen/qwen3-235b-a22b-2507`, `qwen/qwen3-235b-a22b-thinking-2507`, `qwen/qwen3-30b-a3b`, `qwen/qwen3-30b-a3b-instruct-2507`, `qwen/qwen3-32b`, `qwen/qwen3-coder`, `qwen/qwen3-coder-30b-a3b-instruct`, `qwen/qwen3-coder-flash`, `qwen/qwen3-coder-next`, `qwen/qwen3-next-80b-a3b-instruct`, `qwen/qwen3-next-80b-a3b-thinking`, `qwen/qwen3-vl-235b-a22b-instruct`, `qwen/qwen3-vl-30b-a3b-instruct`, `qwen/qwen3-vl-30b-a3b-thinking`, `qwen/qwen3-vl-8b-instruct`, `qwen/qwen3.5-122b-a10b`, `qwen/qwen3.5-27b`, `qwen/qwen3.5-35b-a3b`, `qwen/qwen3.5-397b-a17b`, `qwen/qwen3.5-9b`, `qwen/qwen3.5-flash-02-23`, `qwen/qwen3.5-plus-02-15`, `qwen/qwen3.5-plus-20260420`, `qwen/qwen3.6-27b`, `qwen/qwen3.6-35b-a3b`, `qwen/qwen3.6-flash`, `qwen/qwen3.6-plus`, `qwen/qwen3.7-flash`, `qwen/qwen3.7-max`, `qwen/qwen3.7-plus`, `qwen/qwen3.7-plus:batch`, `qwen/qwen3.8-2.4t-a95b`, `qwen/qwen3.8-27b`, `qwen/qwen3.8-flash`, `qwen/qwen3.8-max-0902`, `qwen/qwen3.8-max-prime`, `qwen/qwen3.8-omni-flash` |
+| reflection | `reflection/beam-1.0-501b-a23b` |
+| rekaai | `rekaai/reka-edge` |
+| relace | `relace/relace-search` |
+| sakana | `sakana/fugu-max`, `sakana/fugu-ultra`, `sakana/fugu-ultra-v2`, `sakana/sakana-namazu` |
+| stepfun | `stepfun/step-3.5-flash`, `stepfun/step-3.7-flash`, `stepfun/step-5-preview` |
+| tencent | `tencent/hy3`, `tencent/hy3-preview`, `tencent/hy4-preview` |
+| thinkingmachines | `thinkingmachines/inkling`, `thinkingmachines/inkling-small`, `thinkingmachines/inkling-small:free`, `thinkingmachines/inkling:free` |
+| typesafe | `typesafe/jev-router` |
+| unbiased | `unbiased/pareto-26.10`, `unbiased/pareto-26.9`, `~unbiased/pareto-latest` |
+| upstage | `upstage/solar-mini4`, `upstage/solar-pro-3`, `upstage/solar-pro4` |
+| x-ai | `x-ai/grok-4.20`, `x-ai/grok-4.3`, `x-ai/grok-4.3:batch`, `x-ai/grok-4.5`, `x-ai/grok-4.6`, `x-ai/grok-4.7`, `x-ai/grok-build-0.1`, `~x-ai/grok-latest` |
+| xiaomi | `xiaomi/mimo-v2.5`, `xiaomi/mimo-v2.5-pro`, `xiaomi/mimo-v2.6-flash`, `xiaomi/mimo-v2.6-pro`, `xiaomi/mimo-v2.6-pro-ultraspeed` |
+| xingchen-agi | `xingchen-agi/xing4.0-29b-a4b:free` |
+| z-ai | `z-ai/glm-4.5`, `z-ai/glm-4.5-air`, `z-ai/glm-4.5v`, `z-ai/glm-4.6`, `z-ai/glm-4.6v`, `z-ai/glm-4.7`, `z-ai/glm-4.7-flash`, `z-ai/glm-5`, `z-ai/glm-5-turbo`, `z-ai/glm-5.1`, `z-ai/glm-5.2`, `z-ai/glm-5.3`, `z-ai/glm-5.3-flash`, `z-ai/glm-5.3-flash:batch`, `z-ai/glm-5.3-flashx`, `z-ai/glm-5.3-prime`, `z-ai/glm-5.3:batch`, `z-ai/glm-5v-turbo`, `~z-ai/glm-flash-latest`, `~z-ai/glm-latest` |
+
+</details>
+
+## 설치
+
+### macOS
+
+[릴리스 페이지](https://github.com/theprismdata/perdix-agent/releases/tag/v0.0.1)에서
+`Perdix-Setup-macos-arm64.dmg`를 다운로드하고 **Perdix Setup.app**을 실행합니다.
+공급자와 인증 정보를 설정한 뒤 새 터미널에서 실행합니다.
+
+```bash
+perdix --version
+```
+
+현재 릴리스 설치본은 Apple Silicon Mac용입니다.
+자세한 내용은 [macOS 설치 안내](docs/macos-installation.md)를 참고하세요.
+
+### 소스에서 실행
+
+Node.js 22 이상, pnpm 10.30.3, Python 3.12 이상, uv가 필요합니다.
+
+```bash
+git clone https://github.com/theprismdata/perdix-agent.git
+cd perdix-agent
+pnpm install
+uv sync --project server
+pnpm -r build
+pnpm --filter perdix dev
+```
+
+Windows 설치 파일을 직접 만들려면 [Windows 빌드 안내](docs/windows-build.md)를 참고하세요.
+VS Code 확장은 릴리스의 VSIX 파일을 **Install from VSIX...**로 설치합니다.
+서버 연결 설정은 [VS Code 확장 안내](packages/vscode/README.md)에 설명되어 있습니다.
 
 ## 사용법
 
-`websearch`는 별도 키 없이 웹 검색 결과의 제목·URL·요약을 반환하고,
-`webfetch`는 공개 페이지의 HTML 본문·링크 또는 텍스트를 읽는다. 모델이 일반 도구로
-선택하며 chat/plan/build와 읽기 전용 하위 에이전트에도 제공한다.
-기본 검색은 Bing RSS이며 검색 엔진의 차단·형식 변경은 도구 오류로 표시한다.
-JavaScript 렌더링·로그인·PDF는 지원하지 않는다. 내부 주소·비표준 포트는 차단하며
-30초·1MB 제한을 적용한다. `deny` 권한 모드에서는 웹 접근도 거부한다.
+### 인증
 
-프로젝트 규칙은 매 모델 호출마다 자동으로 읽는다. 전역 `~/.claude/CLAUDE.md`,
-상위 폴더부터 작업 폴더까지의 `AGENTS.md`, `CLAUDE.md`, `.claude/CLAUDE.md`,
-`CLAUDE.local.md`를 합치며 가까운 폴더와 나중 파일을 우선한다. 메모리 참조를
-꺼도 규칙 로딩은 유지된다. 메인·하위 에이전트 모두 같은 로더를 사용한다.
-`CLAUDE.md`의 독립된 `@문서.md` 줄은 프로젝트 안의 Markdown을 임포트한다.
-임포트 순환·중복·크기를 제한하며 외부 경로와 코드 블록 안의 임포트는 제외한다.
-하위 폴더 규칙은 파일 도구의 `path`로 발견하고 다음 모델 호출에 적용한다.
-새 규칙을 보지 못한 상태의 쓰기는 확인 요청 결과를 반환하고 재시도한다.
-셸 명령 문자열의 경로는 추론하지 않으므로 하위 파일은 먼저 파일 도구로 조회해야 한다.
-규칙은 프롬프트 지침이며 읽기 전용 모드·신뢰 게이트·실행 권한을 완화하지 않는다.
+설치 프로그램에서 인증을 설정했으면 바로 사용할 수 있습니다.
+직접 설정할 때는 사용할 제공자의 API 키를 환경변수 또는 `~/.perdix/credentials.json`에 등록합니다.
 
-여러 단계가 필요한 요청에서는 작업 시작 설명, 주요 발견과 검증 결과를 대화 중에
-짧게 전달하도록 에이전트에 지시한다. 진행 설명은 일반 답변처럼 즉시 스트리밍되며,
-CLI와 VS Code 채팅에서 도구 실행 상태와 함께 볼 수 있다. 설명의 빈도는 모델에
-따라 달라지며, 고정 시간 알림이나 완료율 표시는 제공하지 않는다.
+| 제공자 | API 키 환경변수 | 계정 로그인 |
+|---|---|---|
+| Anthropic | `ANTHROPIC_API_KEY` | `perdix auth login --provider anthropic` (ant CLI 필요) |
+| OpenAI | `OPENAI_API_KEY` | `perdix auth login --provider openai` (ChatGPT) |
+| Google Gemini | `GEMINI_API_KEY` | API 키 사용 |
+| OpenRouter | `OPENROUTER_API_KEY` | API 키 사용 |
+| Ollama | 필요 없음 | 로컬 서버 사용 |
 
-CLI 입력창 위에서는 모델 응답 대기·도구 실행·승인 대기와 경과 시간을 볼 수 있다.
-30초간 새 이벤트가 없으면 수신 대기 안내가 표시된다. 요청 종료 시에는 대화에
-완료·취소·검증 실패 안내를 남기며, 최종 답변이나 도구 결과가 없으면 미완료를 알린다.
-`chat`과 `plan`은 읽기 전용이다. Git 동기화 등 변경 작업은 `/agent build`로 전환한다.
+환경 변수를 이용한 키 설정
+```bash
+# Anthropic
+export ANTHROPIC_API_KEY="your-api-key"
+perdix --provider anthropic
 
-### VS Code 채팅 화면
+# OpenAI
+export OPENAI_API_KEY="your-api-key"
+perdix --provider openai
 
-`perdix-vscode-0.0.1.vsix`를 **Install from VSIX...**로 설치한 뒤, 사이드바의 Perdix 아이콘을 누른다. 터미널이 아닌 Webview에서 대화·모델 선택·작업 승인·이전 대화 불러오기를 제공한다. Windows 설치 프로그램의 서버와 키 설정을 자동으로 사용한다. 기존 확장을 업데이트했으면 VS Code 창을 다시 로드한다. 자세한 사용법은 [확장 안내](packages/vscode/README.md)를 참고한다.
+# Google Gemini
+export GEMINI_API_KEY="your-api-key"
+perdix --provider gemini
 
-### macOS 설치 프로그램
+# OpenRouter
+export OPENROUTER_API_KEY="your-api-key"
+perdix --provider openrouter
 
-`Perdix-Setup-macos-arm64.dmg`를 열고 **Perdix Setup.app**을 실행한다. 공급자·API 키·모델을 설정하면 CLI·서버·VS Code 확장을 함께 설치한다. 새 터미널에서 `perdix`를 실행한다. Apple Silicon용이며 Intel Mac에서는 해당 환경에서 `pnpm build:macos`로 x64용을 빌드한다. 자세한 설치·빌드 방법은 [Mac 설치 안내](docs/macos-installation.md)를 참고한다.
-
-### Windows 설치 프로그램 (권장)
-
-자세한 준비 사항, 빌드 옵션, 키 설정 및 검증 결과는 [Windows 빌드 안내](docs/windows-build.md)를 참고한다.
-
-`dist/Perdix-Setup-windows-x64.exe`를 실행하고 공급자와 API 키를 입력하면 설치가 끝난다.
-프로그램, 키 파일, 기본 모델, 바탕화면·시작 메뉴 바로가기를 자동으로 설정한다.
-VS Code가 설치되어 있으면 Perdix Webview 확장도 함께 자동 설치한다.
-키 입력을 비우면 해당 공급자의 기존 저장 키를 사용한다. 첫 설치에는 키가 필요하다.
-API 키는 사용자 홈의 `.perdix/credentials.json`에 저장한다. 모델은
-`.perdix/agents.json`의 역할별 할당을 사용하며 `--model`로 명시적으로 변경할 수 있다.
-제거 시 키와 세션 기록은 남긴다. 런타임 설치나 JSON 직접 편집은 필요 없다.
-
-Windows x64 개발 환경에서 Node.js 22 이상, pnpm 10.30.3, Bun, uv, Inno Setup 6을 준비한다.
-루트의 `build-windows.cmd`를 더블클릭하거나 다음 명령 하나로 빌드한다.
-
-```powershell
-pnpm build:windows
+# Ollama (기본 http://127.0.0.1:11434/v1)
+ollama pull qwen3:4b
+perdix --provider ollama --model qwen3:4b
 ```
 
-의존성 설치, CLI·서버 빌드, 설치 파일 생성, 실행 확인을 자동으로 수행한다.
-빌드 결과는 `dist/Perdix-Setup-windows-x64.exe`다. 성공하면 중간 빌드 폴더는 휴지통으로 이동한다. 휴지통 기능을 지원하지 않는 환경에서는 경고와 함께 폴더를 남긴다. 빌드 실패 시에도 진단을 위해 남긴다.
+Gemma는 미리 다운로드하지 않아도 모델 선택 목록에 표시됩니다. 선택한 모델이 없으면
+Perdix가 `ollama pull gemma3:4b`처럼 설치 명령을 안내하며, 사용자가 받은 뒤 같은 요청을
+다시 실행할 수 있습니다. Gemma 3의 도구 호출 호환성은 모델·Ollama 버전에 따라 다르므로
+파일 수정과 명령 실행이 필요한 작업에는 도구 지원 모델을 권장합니다.
 
-- `pnpm build:windows -CheckOnly`: 필요한 빌드 도구만 확인한다.
-- `pnpm build:windows -KeepBuildFiles`: 중간 빌드 폴더를 보관한다.
-- `pnpm build:windows -InnoCompiler "C:\경로\ISCC.exe"`: Inno Setup 컴파일러 위치를 지정한다.
+Ollama의 기본 컨텍스트는 장비에 따라 작게 잡힐 수 있습니다. 코딩 에이전트에는 Ollama
+앱 설정에서 컨텍스트를 늘리거나 `OLLAMA_CONTEXT_LENGTH=64000 ollama serve`로 서버를
+시작하는 것을 권장합니다. 실제 할당값은 `ollama ps`의 `CONTEXT`에서 확인합니다.
 
-현재 서버의 Unix 셸 명령·프로세스 그룹 취소 처리에는 Windows 호환성 제한이 있다.
-
-### 1. API 키 준비
-
-처음 CLI를 실행하면 `~/.perdix/credentials.json`을 자동 생성하고 경로를 안내한다.
-`anthropic`과 `openai`의 `api_key` 기본값은 빈 문자열이다. 사용할 공급자의 키를 넣으면 된다.
-기존 파일은 수정하거나 덮어쓰지 않는다. `--help`, `--version`은 파일을 생성하지 않는다.
-
-OpenAI는 키가 없어도 사용할 수 있다. OpenAI 모델의 첫 요청에서 브라우저로
-ChatGPT 로그인을 진행하고, 이후 저장된 토큰을 자동 갱신한다.
-`perdix auth login --provider openai`로 먼저 로그인할 수도 있다.
-환경변수 또는 파일에 API 키가 있으면 키가 우선한다. [인증 안내](docs/openai-auth.md)
-
-둘 중 하나에 Anthropic API 키를 넣는다.
-
-- 환경변수: `export ANTHROPIC_API_KEY=sk-ant-...`
-- 파일: `~/.perdix/credentials.json` (권한 `chmod 600`)
-
-```json
-{"anthropic": {"api_key": "sk-ant-..."}}
-```
-
-Gemini는 `GEMINI_API_KEY` 또는 같은 파일의 `gemini.api_key`를 사용한다.
-`perdix auth login --provider gemini --api-key <key>`로 등록하거나 Hermes에서
-`/login gemini`를 실행하고 숨겨진 입력창에 키를 붙여 넣는다.
-키 발급: https://aistudio.google.com/apikey
-`/model gemini-3.8-flash`로 선택할 수 있으며 인증 실패 시 다른 공급자로 우회하지 않는다.
-Gemini 네이티브 어댑터는 텍스트·이미지·도구 호출·도구 결과·토큰 사용량을 처리하고
-동일 모델의 thoughtSignature를 보존한다([ADR 0018](docs/adr/0018-gemini-provider.md)).
-
-OpenRouter는 `OPENROUTER_API_KEY` 또는 `credentials.json`의
-`{"openrouter": {"api_key": "..."}}`로 인증한다. 키 발급은
-https://openrouter.ai/settings/keys 에서 한다. Hermes의 `/login openrouter`는
-키를 숨겨서 입력받으며, CLI에서는
-`perdix auth login --provider openrouter --api-key <key>`로 등록한다.
-`perdix auth status --provider openrouter`로 활성 키의 출처를 확인한다.
-키가 없거나 인증·잔액 오류가 발생하면 다른 공급자로 우회하지 않는다.
-
-`/model qwen/qwen3-coder-flash`, `/model openai/gpt-6.1-sol`,
-`/model anthropic/claude-sonnet-5.5`, `/model google/gemini-3.8-flash`는
-OpenRouter 경유 연결이다. 공급자 접두사 없는 기존 모델 ID는 직접 연결이다.
-프롬프트·도구·권한은 기존 것을 사용하며 공급자 어댑터가 와이어 형식을 변환한다.
-목록 밖 OpenRouter 모델도 `agents.json`의 `models`에 `provider: "openrouter"`로
-등록하고 역할에 할당할 수 있다([ADR 0019](docs/adr/0019-openrouter-provider.md)).
-
-저장소의 [`agents.openrouter.example.json`](agents.openrouter.example.json)을 사용자 설정
-폴더의 `~/.perdix/agents.openrouter.json`에 복사하면 OpenRouter 전용 경제형 설정을
-사용할 수 있다. 대화·코딩·탐색은 Qwen Coder Flash, 검토·계획은 Claude Sonnet,
-디버깅은 GPT Sol을 사용한다. `perdix --agents-config ~/.perdix/agents.openrouter.json`으로
-시작하면 모드 전환·하위 에이전트·인증 후 재연결에도 이 설정을 사용한다. 또는
-기존 `agents.json`을 백업하고 내용으로 적용한 뒤 서버를 재시작한다.
-카탈로그 비용은 2026-10-13 기본 단가에 따른 추정이며 긴 입력·캐시·라우팅·키 충전
-수수료에 따라 실제 청구액은 달라질 수 있다.
-
-### 2. 실행
-
-프로젝트 폴더로 이동한 뒤 `perdix`를 실행한다.
+개인·업무 인증을 구분하려면 이름 있는 프로필로 등록하고 기본 인증을 선택합니다.
 
 ```bash
-cd 내-프로젝트
+perdix auth login --provider openai --profile personal
+perdix auth use --provider openai --profile personal
+perdix auth list
+```
+
+자세한 내용은 [OpenAI 인증 안내](docs/openai-auth.md)를 참고하세요.
+개인·업무 계정을 나눠 사용하려면 [인증 프로필 안내](docs/auth-profiles.md)를 참고하세요.
+
+### 프로젝트에서 시작
+
+```bash
+cd my-project
 perdix
 ```
 
-자주 쓰는 옵션:
+기본 `general` 모드는 읽기 전용입니다. 코드 수정을 맡기려면 `build` 모드로 전환합니다.
 
-| 옵션 | 설명 |
-|---|---|
-| `--mode <chat\|plan\|build>` | 작업 모드 (기본값 `chat`) |
-| `--model <이름>` | 사용할 모델 (예: `claude-sonnet-5-5`) |
-| `--cwd <폴더>` | 작업 폴더 지정 |
-| `--resume <세션ID>` | 이전 대화 이어하기 |
-| `--tui hermes` | Hermes TUI 평가판 ([사용 안내](docs/hermes-tui.md)) |
-| `--list` | 저장된 세션 목록 보기 |
-| `-p "질문"` | 한 번만 묻고 끝내기 (비대화식) |
-| `--json` | `-p`와 함께 쓰면 결과를 JSON 줄로 출력 |
-| `-h`, `-v` | 도움말 / 버전 |
+```text
+이 프로젝트의 구조를 설명해줘.
 
-```bash
-perdix --mode plan --model claude-sonnet-5-5
-perdix -p "이 프로젝트 구조를 설명해줘"
+/agent build
+로그인 오류를 수정하고 관련 테스트를 실행해줘.
 ```
 
-### 3. 대화 중 명령
+계획 모드로 시작하거나, 한 번만 질문할 수도 있습니다.
 
-입력창에 `/`로 시작하는 명령을 입력한다. `/`만 쳐도 쓸 수 있는 명령 목록이 팝업으로 뜨고,
-계속 타이핑하면 후보가 좁혀진다. ↑/↓로 선택을 옮기고 Tab이나 Enter로 확정한다. `/agent `,
-`/model ` 뒤에서는 실제 값(`chat`/`plan`/`build`, 모델 목록)도 같은 방식으로 추천된다.
+```bash
+perdix --mode plan
+perdix -p "이 프로젝트의 구조를 설명해줘"
+```
+
+### 주요 명령
 
 | 명령 | 설명 |
 |---|---|
-| `/agent <id>` | 에이전트 모드 바꾸기 (`chat`/`plan`/`build`) — 서브에이전트(아래 6번)와는 다른 개념이다 |
-| `/model <이름>` | 모델 바꾸기 |
-| `/sessions` | 저장된 세션 목록 보기 |
-| `/memories` | 자동 메모리 상태 조회 (`use on/off`, `generate on/off`로 세션별 제어) |
-| `/clear` | 화면 지우기 |
-| `/help` | 도움말 보기 |
-| `/quit` (`/exit`) | 종료 (Ctrl+C 두 번도 가능) |
+| `/agent general\|plan\|build` | 작업 모드 변경 |
+| `/model <이름>` | 모델 변경 |
+| `/sessions` | 저장된 대화 목록 |
+| `/auth status` | 현재 대화의 제공자별 인증 확인 |
+| `/auth use <제공자> <프로필>` | 현재 대화의 인증 프로필 변경 |
+| `/help` | 도움말 |
+| `/quit` | 종료 |
 
-`/`로 시작하지 않는 글은 모두 에이전트에게 보내는 메시지다.
+입력창에 `/`를 입력하면 사용할 수 있는 명령을 확인할 수 있습니다.
+CLI 옵션은 `perdix --help`로 확인하세요.
 
-유휴 대화에서 메모리를 자동 추출·통합해 다음 세션에 반영한다. 기본 유휴 기준은
-6시간이며 자세한 설정과 저장 경로는 [메모리 안내](docs/memory.md)를 참고한다.
+## 텔레그램에서 사용하기
 
-### 4. 서버 위치 지정 (보통은 필요 없음)
+`perdix-gateway`를 실행하면 휴대폰이나 데스크톱의 Telegram에서 Perdix에 작업을
+요청하고 답변을 받을 수 있습니다. 게이트웨이를 실행하는 컴퓨터가 켜져 있고 인터넷에
+연결되어 있어야 합니다. 연결에는 소스의 `server` 환경(Python 3.12 이상, uv)을 사용합니다.
 
-`perdix`는 아래 순서로 서버 실행 명령을 찾는다.
+### 1. 봇 만들기
 
-1. `--server <명령>` 옵션
-2. 환경변수 `PERDIX_SERVER`
-3. 실행 파일 옆의 `server/perdix-server.exe`
-4. PATH에 있는 `perdix-server`
-5. CLI 옆에 Python 서버 소스가 있으면 uv로 실행하는 호환 경로
-6. 저장소 안에서 개발 중이면 `uv run perdix-server`
+Telegram의 공식 [@BotFather](https://t.me/BotFather)에서 `/newbot`을 보내고
+봇 이름과 `bot`으로 끝나는 사용자 이름을 정합니다. 발급된 토큰을 보관한 뒤,
+새 봇의 대화창에서 **Start**를 누릅니다.
 
-찾지 못하면 "perdix-server not found" 메시지가 나온다. 이때는 `uv tool install perdix`로 설치하거나 `PERDIX_SERVER`를 설정한다.
+기존 봇을 재사용할 때는 같은 토큰을 사용하는 다른 프로그램의 수신을 중지하고,
+Webhook이 설정되어 있다면 해제합니다. Perdix는 long polling으로 메시지를 받습니다.
+다른 에이전트도 계속 사용하려면 Perdix 전용 봇을 따로 만드세요.
 
-### 5. 서버만 따로 띄우기 (ACP 클라이언트용)
+### 2. 프로젝트와 허용 계정 등록
 
-Zed 같은 ACP 클라이언트에 붙일 때는 서버만 실행한다.
+[Telegram Bot API의 `getUpdates`](https://core.telegram.org/bots/api#getupdates) 응답에서
+시작 메시지의 `message.from.id`(사용자 ID)와 `message.chat.id`(채팅 ID)를 확인합니다.
+개인 채팅에서는 보통 두 값이 같고, 그룹에서는 별도의 채팅 ID를 사용합니다.
 
-```bash
-(cd server && uv run perdix-server --model claude-opus-5-5)
-```
-
-API 키 없이 스크립트된 응답으로 테스트하고 싶으면 fake 공급자를 쓴다.
-
-```bash
-(cd server && uv run perdix-server --provider fake --fake-script tests/fixtures/demo.json --db /tmp/perdix.db)
-```
-
-### 6. 역할별 모델 지정
-
-`task` 도구로 띄우는 서브에이전트(`explore`/`executor`/`reviewer`/`debugger`/`security-reviewer`, 내부 전용 `compactor`/`titler`)는 역할마다
-기본 모델이 다르다. 메인 역할 `chat`, `plan`, `build`도 같은 JSON 설정으로 할당한다.
-서버는 사용자 설정 폴더의 `~/.perdix/agents.json`을 자동으로 읽으며 `--agents-config`가 우선한다.
-
-**기본값** (설정을 안 주면 이대로 동작한다)
-
-| 역할 | 기본 모델 | effort |
-|---|---|---|
-| `explore` | `claude-haiku-4-5` | (없음) |
-| `executor` | `claude-opus-5-5` | `high` |
-| `reviewer` | `claude-sonnet-5-5` | `medium` |
-| `debugger` | `claude-sonnet-5-5` | `medium` |
-| `security-reviewer` | `claude-sonnet-5-5` | `medium` |
-| `compactor` | `claude-haiku-4-5` | (없음) |
-| `titler` | `claude-haiku-4-5` | (없음) |
-
-이 표는 설정 파일이 없을 때의 서브에이전트 기본값이다. 사용자 설정 파일
-`~/.perdix/agents.json`에는 다음처럼 할당할 수 있다.
-
-| 역할 | 모델 |
-|---|---|
-| `chat` | `gpt-6-luna` |
-| `build`, `executor` | `gpt-6.1-sol` |
-| `debugger` | `gpt-6-astra` |
-| `plan`, `security-reviewer` | `claude-opus-5-5` |
-| `reviewer` | `claude-sonnet-5-5` |
-| `explore`, `compactor`, `titler` | `gemini-3.8-flash` |
-
-자동·수동 모드 전환 시 해당 역할의 모델과 effort가 적용된다. 자동 전환에서는
-현재 Turn의 다음 모델 호출부터 바뀌며 화면에도 모델 변경이 전달된다.
-새 세션은 시작 역할의 모델을 사용하지만 CLI `--model` 등 명시적 세션 초기 모델이 우선한다.
-서버 `--model`은 역할 할당이 없을 때의 기본값이다.
-`/model`은 현재 역할의 모델을 바꾸고, 다음 모드 전환에서 사전 할당이 다시 적용된다.
-파일 변경은 서버 재시작 후 적용되며 모든 프로젝트에 같은 할당을 사용한다.
-다른 파일을 사용하려면 `--agents-config`에 절대 경로를 지정한다.
-
-**설정 파일 예시** ([`agents.example.json`](agents.example.json))
+`~/.perdix/gateway.json`을 만들고 아래 경로와 ID를 자신의 값으로 바꿉니다.
+`cwd`는 게이트웨이가 접근할 수 있는 **존재하는 절대 경로**여야 합니다.
 
 ```json
 {
-  "models": {
-    "strong": { "provider": "anthropic", "model": "claude-opus-5-5" },
-    "cheap":  { "provider": "openai",    "model": "gpt-6-luna" }
+  "host": "127.0.0.1",
+  "port": 18790,
+  "projects": {
+    "my-app": {
+      "cwd": "/absolute/path/to/my-app",
+      "trust_project": false
+    }
   },
-  "agents": {
-    "executor": { "model": "strong", "effort": "high" },
-    "explore":  { "model": "cheap" }
+  "server": {
+    "provider": "openrouter",
+    "model": "openai/gpt-6.1-sol",
+    "permission_mode": "interactive"
+  },
+  "telegram": {
+    "allowed_user_ids": [123456789],
+    "allowed_chat_ids": [123456789]
   }
 }
 ```
 
-- `models`: 모델 별칭 테이블. `agents`에서 별칭 대신 실제 모델 id를 바로 써도 된다.
-- `agents`: 역할 id → `{ "model": ..., "effort": ... }`. 역할을 적으면 모델과 effort를
-  **둘 다 같이** 교체한다(`effort`를 안 쓰면 "effort 없음"이 된다 — 위 기본값의 effort가
-  그대로 유지되는 게 아니다).
-- 적지 않은 역할은 위 기본값 표 그대로 동작한다.
+허용한 사용자가 허용한 채팅에서 보낸 요청만 처리합니다. 모델 인증은 앞의 인증 안내에
+따라 `~/.perdix/credentials.json`에 등록합니다. 게이트웨이는 모델 API 키 환경변수를
+자식 서버에 전달하지 않습니다. 제공자와 모델은 `server`에서 변경할 수 있습니다.
 
-**실행 방법**
+### 3. 게이트웨이 실행
 
-서버를 직접 띄울 때:
+저장소 루트에서 실행합니다. 아래 Bash 예시는 토큰을 화면에 표시하지 않고 입력받습니다.
 
 ```bash
-(cd server && uv run perdix-server --agents-config /path/to/agents.json)
+uv sync --project server
+read -r -s -p "Telegram bot token: " PERDIX_TELEGRAM_TOKEN
+echo
+export PERDIX_TELEGRAM_TOKEN
+export PERDIX_GATEWAY_TOKEN="$(uv run --project server python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+uv run --project server perdix-gateway --config "$HOME/.perdix/gateway.json"
 ```
 
-`perdix` CLI로 실행할 때는 `--server`로 서버 실행 명령 자체를 바꿔서 전달한다:
+봇 토큰과 대시보드 연결 토큰은 저장소나 공개 채팅에 올리지 마세요.
+브라우저에서 `http://127.0.0.1:18790`을 열고 `PERDIX_GATEWAY_TOKEN` 값으로
+연결하면 작업 기록과 도구 권한 승인 요청을 확인할 수 있습니다.
+지속해서 사용하려면 환경변수와 실행 명령을 운영체제의 서비스에 등록합니다.
 
-```bash
-perdix --server "uv run --project server perdix-server --agents-config /path/to/agents.json"
+### 4. Telegram에서 요청하기
+
+```text
+/projects
+/run my-app 이 프로젝트의 구조를 설명해줘
+/model
+/model deepseek
+방금 설명한 내용에서 개선할 부분은 뭐야?
+/status 작업ID
+/cancel 작업ID
 ```
 
-**우선순위**: 모델이 겹쳐서 정해지면 `task` 도구 호출의 `model` 입력(모델 호출 시 그 자리에서
-준 값) > 이 설정 파일의 오버라이드 > 위 기본값 표, 순서로 이긴다.
+프로젝트가 하나면 `/run` 없이 일반 메시지로 요청할 수 있습니다. 여러 프로젝트가
+있으면 `/run 프로젝트 요청`으로 선택하며, 후속 메시지는 같은 채팅에서 마지막으로
+선택한 프로젝트와 대화 세션을 이어갑니다. 답변은 같은 채팅에 본문으로 전달됩니다.
+도구 실행에 승인이 필요하면 웹 대시보드에서 처리합니다.
 
-## 개발
+Telegram에서 `/model`을 보내고 **모델 종류 → 원하는 모델 버튼**을 누르면
+다음 요청부터 변경됩니다. 목록은 이전·다음 버튼으로 이동하며 모델 ID를 직접
+입력할 필요가 없습니다. `/model 검색어`로 검색하는 것도 가능합니다.
+선택은 본인의 채팅·프로젝트별로 저장되며 이전 대화는 유지됩니다.
 
-### 처음 한 번 설치
+GitHub 연결, 상세 설정과 재시작 동작은 [Gateway 안내](docs/gateway.md)를 참고하세요.
 
-```bash
-scripts/bootstrap.sh          # pnpm install + (cd server && uv sync)
-```
+Hermes와 OpenClaw도 프로젝트별 ACP 실행 명령을 등록해 **같은 봇**에서 선택할 수 있습니다.
+`/run hermes 요청`, `/run openclaw 요청`, `/run perdix 요청`으로 대상을 바꾸며,
+이후 일반 메시지는 마지막으로 선택한 대상으로 전달됩니다. 각 에이전트의 설치와
+모델 인증이 필요하고, OpenClaw는 자체 Gateway도 실행해야 합니다.
+[여러 에이전트 연결 설정](docs/gateway.md#hermes--openclaw를-같은-봇에-연결)을 참고하세요.
 
-### 개발 중 실행
+팀 작업은 [워크플로 안내](docs/workflows.md)와 [터미널 팀 안내](docs/terminal-teams.md)를 참고하세요.
 
-Windows PowerShell에서는 저장소 루트에서 의존성을 설치하고 빌드한다(Node.js 22 이상, pnpm, uv 필요).
-
-```powershell
-pnpm install --frozen-lockfile
-uv sync --locked --project server
-pnpm -r build
-node packages/cli/dist/main.js --help
-node packages/cli/dist/main.js
-```
-
-API 키를 환경변수로 지정할 때는 `$env:ANTHROPIC_API_KEY = '키'` 형식을 사용한다.
-
-```bash
-(cd packages/cli && pnpm build) && node packages/cli/dist/main.js   # 빌드한 CLI 실행
-(cd server && uv run python scripts/chat.py)                       # TUI 없이 텍스트로 대화
-```
-
-### 빌드와 정적 검사
-
-```bash
-pnpm -r build && pnpm -r lint && pnpm -r typecheck
-(cd server && uv run ruff check . && uv run mypy src)
-```
-
-```bash
-scripts/bootstrap.sh          # pnpm install + (cd server && uv sync)
-pnpm -r build && pnpm -r lint && pnpm -r typecheck
-(cd server && uv run ruff check . && uv run mypy src)
-```
-
-uv 없이 pip만 쓰는 경우(서버):
-
-```bash
-cd server
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt          # 런타임
-pip install -r requirements-dev.txt -e . # 개발(pytest, ruff, mypy 포함)
-```
-
-`requirements*.txt`는 `uv.lock`에서 생성한 고정 버전 목록이다. 의존성을 바꾸면 `uv add/remove` 후 아래로 다시 생성한다.
-
-```bash
-cd server
-uv export --format requirements-txt --no-hashes --no-dev --no-emit-project -o requirements.txt
-uv export --format requirements-txt --no-hashes --no-emit-project -o requirements-dev.txt
-```
-
-### OpenRouter 모델 메뉴
-
-Hermes TUI에서 `/assign`을 실행하면 OpenRouter 목록을 조회한 뒤 에이전트를
-고르고 모델 ID를 입력 검색해 Enter로 할당할 수 있다. Esc로 이전 단계·취소한다.
-목록은 텍스트 출력과 도구 호출을 지원하는 모델에 한정한다. 저장은 서버가
-`~/.perdix/agents.json` 또는 `--agents-config` 지정 파일에 수행한다. 다른 역할과
-기존 effort는 보존하고 모델의 한도·가격 메타데이터도 저장한다. 현재 역할이면
-현재 세션에도 적용되며 다른 역할은 다음 실행부터 사용한다. 조회·저장은 실행 중
-거절되며 목록 오류 시 설정을 바꾸지 않는다. 실제 호출에는 OpenRouter 키가 필요하다.
-
-### 자동 컨텍스트 압축
-
-모델 호출 전 입력 추정치와 출력 예약량이 컨텍스트 창의 75%에 도달하면 완료된
-오래된 기록을 자동 요약한다. `~/.perdix/agents.json`의 `compactor` 모델·effort
-할당을 사용하며, 현재 사용자 요청과 마지막 assistant·도구 결과는 보존한다.
-원본 event log는 유지하고 `compaction` 이벤트를 추가해 다음 요청의 투영만 바꾼다.
-추정치는 UTF-8 크기와 직전 공급자 사용량을 참고하므로 실제 토큰 수와 차이가 있다.
-요약 호출은 45초·최대 8회로 제한하며 공용 실행 예산을 소비한다. 요약 실패 시
-오래된 도구 결과를 줄이고, 그래도 한도를 넘으면 명확한 오류로 요청을 중단한다.
-세부 정책은 [ADR 0022](docs/adr/0022-automatic-compaction.md)를 참고한다.
-
-### Telegram · GitHub · 웹 대시보드
-
-`perdix-gateway`로 상주 게이트웨이를 실행할 수 있다. 등록한 프로젝트의 작업을
-웹·Telegram·GitHub 이슈에서 접수하고, 웹에서 실행 기록·결과·취소·권한 승인을
-처리한다. 화면을 닫아도 작업은 계속 실행된다.
-
-```bash
-cd server
-uv run perdix-gateway --config /absolute/path/to/gateway.json
-```
-
-환경 변수 `PERDIX_GATEWAY_TOKEN`과 프로젝트 설정이 필요하다.
-[설정과 서비스 연결 방법](docs/gateway.md)을 참고한다.
+개발 구조와 통신 방식은 [아키텍처](docs/architecture.md)와 [프로토콜](docs/protocol.md)에 정리되어 있습니다.

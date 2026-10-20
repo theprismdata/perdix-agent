@@ -23,7 +23,7 @@ const MAX_WIDTH = 90
 
 type Stage = 'agent' | 'provider' | 'key' | 'model' | 'reasoning' | 'disconnect'
 
-const AGENT_ROLES = ['chat', 'plan', 'build', 'explore', 'executor', 'reviewer', 'debugger',
+const AGENT_ROLES = ['general', 'plan', 'build', 'explore', 'executor', 'reviewer', 'debugger',
   'security-reviewer', 'compactor', 'titler'] as const
 
 type ProviderRow = { name: string; provider: ModelOptionProvider }

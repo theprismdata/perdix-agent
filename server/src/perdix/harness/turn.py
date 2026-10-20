@@ -178,6 +178,8 @@ class TurnRunner:
         sleep: Sleep = asyncio.sleep,
         cancel_grace: float = CANCEL_GRACE_SECONDS,
         provider_factory: ProviderFactory | None = None,
+        role_provider_factory: Callable[[str, str], llm.Provider] | None = None,
+        auth_profiles: dict[str, str] | None = None,
         agents_config: AgentsConfig | None = None,
         on_step: Callable[[], Awaitable[None]] | None = None,
         memory_root: Path | None = None,
@@ -206,6 +208,8 @@ class TurnRunner:
         self._cancel_grace = cancel_grace
         # 서브에이전트 스폰용(task 도구). None이면 이 러너에서는 스폰 불가.
         self.provider_factory = provider_factory
+        self.role_provider_factory = role_provider_factory
+        self.auth_profiles = dict(auth_profiles or {})
         self.compactor_factory = compactor_factory or provider_factory
         self._observed_input: int | None = None
         self._previous_estimate: int | None = None
@@ -371,7 +375,7 @@ class TurnRunner:
                 system += "\n" + render_instructions(scoped)
         if self.registry.get("switch_mode") is not None:
             system += (
-                "\n매 요청의 의도에 따라 모드를 선택하세요: 질문·설명·조사는 chat, "
+                "\n매 요청의 의도에 따라 모드를 선택하세요: 질문·설명·조사는 general, "
                 "계획만 요청하면 plan, 구현·수정·실행은 build. 현재 모드와 다르면 "
                 "다른 작업 전에 switch_mode만 단독 호출하세요. 읽기 전용 모드에서도 "
                 "사용자가 구현을 요청하면 build로 전환할 수 있습니다. 이전 대화도 참고하되 "
@@ -785,6 +789,8 @@ class TurnRunner:
             budget=self.budget,
             hooks=self.hooks,
             provider_factory=self.provider_factory,
+            role_provider_factory=self.role_provider_factory,
+            auth_profiles=self.auth_profiles,
             system_prompt_builder=self.system_prompt_builder,
             max_tokens=self.max_tokens,
             model=model,

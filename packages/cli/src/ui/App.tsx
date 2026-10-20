@@ -40,6 +40,8 @@ export const SLASH_COMMANDS: SlashCommandHint[] = [
   { name: "/workflow", hint: "plan <request> | start <runId> | status <runId> | resume <runId> | retry <runId> <taskId> | accept <runId> | reject <runId>" },
   { name: "/team", hint: "팀 안내·상태 조회·종료" },
   { name: "/memories", hint: "자동 메모리 상태·생성·참조 설정" },
+  { name: "/auth", hint: "status | list | use <제공자> <프로필|legacy>" },
+  { name: "/permissions", hint: "interactive | yolo | deny | accept-edits | allowlist" },
   { name: "/loop", hint: "<목표> 실행·검증·수정 반복" },
   { name: "/agent", hint: "<id> switch agent" },
   { name: "/model", hint: "<name> switch model" },
@@ -170,6 +172,8 @@ export function App({ handle, listSessions, onRunAuth, initialNotice }: AppProps
           }
           await handle.prompt(line);
           return;
+        case "/auth":
+        case "/permissions":
         case "/memories":
           if (runningRef.current) {
             notice("작업이 끝난 뒤 메모리 설정을 변경하세요.", true);

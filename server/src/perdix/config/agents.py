@@ -1,6 +1,6 @@
 """역할별 모델 오버라이드 설정 (architecture.md §6.10).
 
-메인 모드(chat/plan/build)와 서브에이전트 프리셋에 적용된다.
+메인 모드(general/plan/build)와 서브에이전트 프리셋에 적용된다.
 파일 형식은 모델 별칭 표(`models`)와 역할→모델 매핑(`agents`)이다.
 
     {"models": {"cheap": {"provider": "anthropic", "model": "claude-haiku-4-5"}},
@@ -22,7 +22,7 @@ from perdix.llm import catalog
 
 
 class ModelAlias(BaseModel):
-    provider: Literal["anthropic", "openai", "gemini", "openrouter"] = "anthropic"
+    provider: Literal["anthropic", "openai", "gemini", "openrouter", "ollama"] = "anthropic"
     model: str
     capabilities: catalog.ModelInfo | None = None
 
@@ -31,6 +31,7 @@ class AgentRoleConfig(BaseModel):
     # 별칭 이름 또는 리터럴 모델 id
     model: str
     effort: str | None = None
+    auth_profile: str | None = None
 
 
 class AgentsConfig(BaseModel):
@@ -50,7 +51,7 @@ class AgentsConfig(BaseModel):
 
     def provider_for(
         self, model: str,
-    ) -> Literal["anthropic", "openai", "gemini", "openrouter"] | None:
+    ) -> Literal["anthropic", "openai", "gemini", "openrouter", "ollama"] | None:
         return next(
             (alias.provider for alias in self.models.values() if alias.model == model), None,
         )
@@ -60,7 +61,7 @@ class AgentsConfig(BaseModel):
 
 
 AGENT_ROLES = (
-    "chat", "plan", "build", "explore", "executor", "reviewer", "debugger",
+    "general", "plan", "build", "explore", "executor", "reviewer", "debugger",
     "security-reviewer", "compactor", "titler",
 )
 
@@ -84,6 +85,7 @@ def assign_openrouter(path: Path | None, role: str, model: str) -> AgentsConfig:
     previous = config.agents.get(role)
     config.agents[role] = AgentRoleConfig(
         model=alias, effort=previous.effort if previous else None,
+        auth_profile=previous.auth_profile if previous else None,
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary: Path | None = None
@@ -109,6 +111,9 @@ def load_agents_config(path: Path | None) -> AgentsConfig:
             return AgentsConfig()
     data = json.loads(path.read_text())
     config = AgentsConfig.model_validate(data)
+    if "chat" in config.agents:
+        legacy = config.agents.pop("chat")
+        config.agents.setdefault("general", legacy)
     for alias in config.models.values():
         if alias.capabilities is not None:
             catalog.register(alias.capabilities.model_copy(update={

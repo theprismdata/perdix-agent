@@ -70,6 +70,8 @@ async def spawn_subagent(
     budget: Budget,
     hooks: HookBus | None = None,
     provider_factory: ProviderFactory,
+    role_provider_factory: Callable[[str, str], Provider] | None = None,
+    auth_profiles: dict[str, str] | None = None,
     system_prompt_builder: SystemPromptBuilder = build_system_prompt,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     sink: Sink = _ignore_event,
@@ -83,10 +85,18 @@ async def spawn_subagent(
     # `model`이 주어지면 프리셋 모델(설정 오버라이드 반영 후)을 덮어쓴다(harness-loop.md §8).
     # effort는 프리셋 그대로.
     effective_model = model or preset.model
-    provider = provider_factory(effective_model)
+    provider = (role_provider_factory(effective_model, preset_id)
+                if role_provider_factory else provider_factory(effective_model))
     record = await store.create_session(
         project_path, preset.mode.id, provider.name, effective_model
     )
+    selections = dict(auth_profiles or {})
+    role = agents_config.role(preset_id) if agents_config else None
+    if role is not None and role.auth_profile is not None:
+        selections[provider.name] = role.auth_profile
+    for name, selected in selections.items():
+        await store.append(record.id, "config_change",
+                           {"key": "auth_profile_" + name, "value": selected})
     runner = TurnRunner(
         store=store,
         provider=provider,
@@ -102,8 +112,10 @@ async def spawn_subagent(
         max_tokens=max_tokens,
         effort=preset.effort,
         on_step=on_step,
-        compactor_factory=provider_factory,
+        compactor_factory=(lambda model: role_provider_factory(model, "compactor"))
+        if role_provider_factory else provider_factory,
         agents_config=agents_config,
+        auth_profiles=selections,
     )
     result = await runner.run(
         record.id,
