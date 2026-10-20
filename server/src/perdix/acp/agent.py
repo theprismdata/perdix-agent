@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal, cast
@@ -104,6 +104,8 @@ from perdix.llm.fake import FakeProvider
 from perdix.llm.gemini import GeminiProvider
 from perdix.llm.openai import OpenAIProvider
 from perdix.llm.openrouter import OpenRouterProvider
+from perdix.mcp.config import servers_from_acp
+from perdix.mcp.hub import McpHub
 from perdix.memory.worker import MemoryWorker
 from perdix.permissions.policy import PermissionMode, PermissionPolicy
 from perdix.sandbox.local import LocalBackend
@@ -111,9 +113,9 @@ from perdix.session.recovery import repair_unpaired_tool_uses
 from perdix.session.store import Event, EventStore, ModeChangePayload, SessionRecord
 from perdix.teams.models import TeamCommand, TeamError
 from perdix.teams.store import TeamStore
-from perdix.tools.base import ToolKind, ToolOutput
+from perdix.tools.base import Tool, ToolKind, ToolOutput
 from perdix.tools.mode import SwitchModeTool
-from perdix.tools.registry import ToolRegistry, builtin_tools
+from perdix.tools.registry import READ_ONLY_KINDS, ToolRegistry, builtin_tools
 from perdix.tools.team import TeamTool
 from perdix.workflows.commands import parse_workflow_command
 from perdix.workflows.service import WorkflowContext, WorkflowService
@@ -165,6 +167,8 @@ class _SessionState:
     model: str
     permission_mode: PermissionMode
     policy: PermissionPolicy
+    # MCP 서버가 제공한 도구(ADR 0034). 세션을 만들거나 불러올 때 채운다.
+    mcp_tools: list[Tool] = field(default_factory=list)
 
 
 def stricter_permission_mode(base: PermissionMode, requested: Any) -> PermissionMode:
@@ -246,6 +250,7 @@ class PerdixAgent:
         self._teams: dict[str, TeamStore] = {}
         self._runner = SessionRunner(self._make_turn_runner)
         self._registry = ToolRegistry(builtin_tools())
+        self._mcp = McpHub()
         self._sandbox = LocalBackend()
         self._providers: dict[str, Provider] = {}
         self._credentials = load_credentials(config.credentials_path)
@@ -304,6 +309,7 @@ class PerdixAgent:
             return self._store
 
     async def aclose(self) -> None:
+        await self._mcp.aclose()
         for team in self._teams.values():
             await team.leave()
         if self._memories.worker is not None:
@@ -350,6 +356,28 @@ class PerdixAgent:
             supports = False
         return self.config.effort if supports else None
 
+    def _mcp_tools_for(self, state: _SessionState) -> list[Tool]:
+        """읽기 전용 모드에는 사용자가 readOnly로 지정한 MCP 도구만 노출한다."""
+        if state.mode.read_only:
+            return [tool for tool in state.mcp_tools if tool.kind in READ_ONLY_KINDS]
+        return list(state.mcp_tools)
+
+    async def _attach_mcp(
+        self, state: _SessionState, client_servers: list[McpServer] | None
+    ) -> None:
+        """MCP 서버를 연결해 세션 도구를 채운다. 실패해도 세션은 계속된다(ADR 0034)."""
+        trusted = self._trusted_root is not None and self._trusted_root == state.cwd.resolve()
+        try:
+            attached = await self._mcp.tools_for(
+                state.cwd, trust_project=trusted, client_servers=servers_from_acp(client_servers)
+            )
+        except Exception:
+            logger.exception("MCP 도구를 불러오지 못했습니다")
+            return
+        state.mcp_tools = list(attached.tools)
+        for name in attached.auto_allow:
+            state.policy.rules[name] = "allow"
+
     def _make_turn_runner(self, session_id: str) -> TurnRunner:
         state = self._sessions[session_id]
         assert self._store is not None
@@ -367,6 +395,7 @@ class PerdixAgent:
             runner.registry = ToolRegistry([
                 *(tool for tool in available if tool is not None),
                 *team_tools,
+                *self._mcp_tools_for(state),
                 mode_tool,
             ])
 
@@ -374,7 +403,7 @@ class PerdixAgent:
         runner = TurnRunner(
             store=self._store,
             provider=self._provider_for(state.model),
-            registry=ToolRegistry([*builtin_tools(), *team_tools]),
+            registry=ToolRegistry([*builtin_tools(), *team_tools, *self._mcp_tools_for(state)]),
             policy=state.policy,
             sandbox=self._sandbox,
             budget=Budget(),
@@ -551,6 +580,7 @@ class PerdixAgent:
             await self._join_team(record.id)
         except TeamError as exc:
             raise RequestError(-32600, str(exc)) from exc
+        await self._attach_mcp(self._sessions[record.id], mcp_servers)
         await self._advertise_commands(record.id)
         return NewSessionResponse(
             session_id=record.id,
@@ -571,13 +601,15 @@ class PerdixAgent:
         # 본문은 TurnBusyError를 던지지 않으므로 여기서 잡히는 것은 락 획득 실패뿐이다.
         try:
             async with self._runner.guard(session_id):
-                return await self._load_locked(session_id, cwd)
+                return await self._load_locked(session_id, cwd, mcp_servers)
         except TurnBusyError as exc:
             raise RequestError.invalid_request(
                 {"sessionId": session_id, "reason": "turn in progress"}
             ) from exc
 
-    async def _load_locked(self, session_id: str, cwd: str) -> LoadSessionResponse:
+    async def _load_locked(
+        self, session_id: str, cwd: str, mcp_servers: list[McpServer] | None = None
+    ) -> LoadSessionResponse:
         store = await self._get_store()
         record = await store.get_session(session_id)
         if record is None:
@@ -591,6 +623,7 @@ class PerdixAgent:
             await self._join_team(session_id)
         except TeamError as exc:
             raise RequestError(-32600, str(exc)) from exc
+        await self._attach_mcp(self._sessions[session_id], mcp_servers)
         await self._replay(session_id, events)
         await self._advertise_commands(session_id)
         return LoadSessionResponse(
@@ -979,6 +1012,7 @@ class PerdixAgent:
             )
             turn.registry = ToolRegistry([
                 *builtin_tools(), *([TeamTool(team)] if team is not None else []),
+                *self._mcp_tools_for(self._state(session_id)),
             ])
             return await GoalRunner(
                 turn, LoopCallbacks(session_id, cancel, sink, ask_permission)
