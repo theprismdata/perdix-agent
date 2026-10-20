@@ -32,6 +32,13 @@ class McpServerConfig(BaseModel):
     read_only: bool = Field(default=False, validation_alias=AliasChoices("read_only", "readOnly"))
     timeout: float = Field(default=120, gt=0, le=3600, allow_inf_nan=False)
     enabled: bool = True
+    # 이 서버의 모든 도구 설명 뒤에 덧붙이는 사용 안내(모델이 선택 인수를 잘못 채울 때 쓴다)
+    hint: str = Field(default="", max_length=2000)
+    # 도구별로 모델에게 보이는 스키마에서 숨길 선택 인수. 키는 서버가 준 원래 도구 이름이다.
+    # 모델이 모든 선택 인수를 채워 서버가 오해하는 경우(예: 빈 배열이 "아무것도 선택 안 함")에 쓴다.
+    omit_params: dict[str, tuple[str, ...]] = Field(
+        default_factory=dict, validation_alias=AliasChoices("omit_params", "omitParams")
+    )
 
 
 def parse_servers(

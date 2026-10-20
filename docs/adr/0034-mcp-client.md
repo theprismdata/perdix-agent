@@ -36,7 +36,7 @@ resources, prompts, sampling, elicitation, Streamable HTTP/SSE 전송은 이번 
 
 우선순위는 ACP 인수 > 프로젝트 > 전역이며 같은 이름은 상위가 덮어쓴다.
 형식은 Claude Code와 같다: `{"mcpServers": {"이름": {"command", "args", "env", "cwd"}}}`.
-Perdix 확장 키는 `readOnly`(bool), `timeout`(초), `enabled`(bool)이다. `.perdix/config.json`과
+Perdix 확장 키는 `readOnly`(bool), `timeout`(초), `enabled`(bool), `hint`(도구 설명에 덧붙일 안내), `omitParams`(도구별로 모델에게 숨길 선택 인수)이다. `.perdix/config.json`과
 `.codex/config.toml`은 이번 범위에서 읽지 않는다.
 
 ## 하위 프로세스 환경(규칙 12)

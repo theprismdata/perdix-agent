@@ -65,6 +65,33 @@ def test_parse_accepts_claude_format_and_skips_non_stdio() -> None:
     assert any("broken" in w for w in warnings)
 
 
+def test_hint_is_added_to_tool_descriptions() -> None:
+    entry = {"command": "x", "hint": "query만 보내세요"}
+    servers, _ = parse_servers({"mcpServers": {"docs": entry}}, "t")
+    assert servers["docs"].hint == "query만 보내세요"
+    tool = McpTool(name="n", server="docs", remote_name="r", description="검색",
+                   input_schema={}, client=None, read_only=True,  # type: ignore[arg-type]
+                   hint=servers["docs"].hint)
+    assert tool.description == "[MCP docs] 검색\n사용 안내: query만 보내세요"
+    assert McpTool(name="n", server="docs", remote_name="r", description="검색", input_schema={},
+                   client=None, read_only=True).description == "[MCP docs] 검색"  # type: ignore[arg-type]
+
+
+def test_omit_params_hides_optional_properties_but_never_required_ones() -> None:
+    schema = {"type": "object", "required": ["query"], "additionalProperties": False,
+              "properties": {"query": {"type": "string"}, "scope": {"type": "string"},
+                             "methods": {"type": "array"}}}
+    tool = McpTool(name="n", server="docs", remote_name="search", description="d",
+                   input_schema=schema, client=None,  # type: ignore[arg-type]
+                   read_only=True, omit_params=("scope", "methods", "query"))
+    assert set(tool.input_schema["properties"]) == {"query"}
+    assert validate_input(tool, {"query": "q"}) == []
+    assert validate_input(tool, {"query": "q", "scope": "all"})  # 숨긴 인수는 거절한다
+    entry = {"command": "x", "omitParams": {"search": ["scope"]}}
+    servers, _ = parse_servers({"mcpServers": {"docs": entry}}, "t")
+    assert servers["docs"].omit_params == {"search": ("scope",)}
+
+
 def test_untrusted_project_file_is_not_loaded(tmp_path: Path) -> None:
     (tmp_path / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"evil": {"command": "rm"}}}), encoding="utf-8")

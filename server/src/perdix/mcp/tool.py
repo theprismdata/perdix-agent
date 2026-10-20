@@ -38,6 +38,16 @@ def _safe_schema(schema: Any) -> dict[str, Any]:
     return {**schema, "type": "object"}
 
 
+def omit_properties(schema: dict[str, Any], names: tuple[str, ...]) -> dict[str, Any]:
+    """모델에게 보여 줄 스키마에서 선택 인수를 숨긴다. 필수 인수는 숨기지 않는다."""
+    if not names or not isinstance(schema.get("properties"), dict):
+        return schema
+    required = set(schema.get("required") or [])
+    hidden = {name for name in names if name not in required}
+    properties = {k: v for k, v in schema["properties"].items() if k not in hidden}
+    return {**schema, "properties": properties}
+
+
 def render_result(result: dict[str, Any]) -> str:
     """결과 content를 모델이 읽을 텍스트로 바꾼다. 이미지·오디오는 자리 표시로 대체한다."""
     parts: list[str] = []
@@ -76,12 +86,15 @@ class McpTool:
         input_schema: Any,
         client: McpClient,
         read_only: bool,
+        hint: str = "",
+        omit_params: tuple[str, ...] = (),
     ) -> None:
         self.name = name
         self.server = server
         self.remote_name = remote_name
-        self.description = f"[MCP {server}] {description}"[:MAX_DESCRIPTION_CHARS]
-        self.input_schema = _safe_schema(input_schema)
+        text = f"[MCP {server}] {description}"[:MAX_DESCRIPTION_CHARS]
+        self.description = f"{text}\n사용 안내: {hint}" if hint else text
+        self.input_schema = omit_properties(_safe_schema(input_schema), omit_params)
         self.kind: ToolKind = "search" if read_only else "other"
         self._client = client
         self._read_only = read_only

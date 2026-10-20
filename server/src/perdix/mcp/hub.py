@@ -76,7 +76,8 @@ class McpHub:
                     name=local, server=name, remote_name=remote_name,
                     description=str(remote.get("description") or remote.get("title") or ""),
                     input_schema=remote.get("inputSchema"), client=client,
-                    read_only=config.read_only,
+                    read_only=config.read_only, hint=config.hint,
+                    omit_params=config.omit_params.get(remote_name, ()),
                 ))
                 if config.read_only:
                     result.auto_allow.add(local)
