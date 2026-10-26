@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pathlib import Path
+
+from pydantic import BaseModel, TypeAdapter
 
 
 class ModelInfo(BaseModel):
@@ -21,6 +23,16 @@ class ModelInfo(BaseModel):
 _MODELS: dict[str, ModelInfo] = {
     m.id: m
     for m in (
+        ModelInfo(
+            id="claude-fable-5-1", provider="anthropic",
+            context_window=1_000_000, max_output=128_000,
+            input_price=10.0, output_price=50.0, supports_effort=True,
+        ),
+        ModelInfo(
+            id="claude-haiku-5-5", provider="anthropic",
+            context_window=1_000_000, max_output=128_000,
+            input_price=0.10, output_price=0.50, supports_effort=True,
+        ),
         ModelInfo(
             id="claude-opus-5-5",
             provider="anthropic",
@@ -85,6 +97,11 @@ _MODELS: dict[str, ModelInfo] = {
             supports_effort=True,
         ),
         ModelInfo(
+            id="gemini-4-argon", provider="gemini",
+            context_window=1_048_576, max_output=65_536,
+            input_price=2.0, output_price=10.0, supports_effort=True,
+        ),
+        ModelInfo(
             id="qwen/qwen3-coder-flash", provider="openrouter",
             context_window=1_000_000, max_output=65_536,
             input_price=0.195, output_price=0.975, supports_effort=False,
@@ -109,8 +126,43 @@ _MODELS: dict[str, ModelInfo] = {
             context_window=1_048_576, max_output=65_536,
             input_price=0.75, output_price=3.75, supports_effort=True,
         ),
+        ModelInfo(
+            id="qwen3:4b", provider="ollama",
+            context_window=65_536, max_output=16_384,
+            input_price=0.0, output_price=0.0, supports_effort=False,
+        ),
+        ModelInfo(
+            id="qwen3:8b", provider="ollama",
+            context_window=40_960, max_output=16_384,
+            input_price=0.0, output_price=0.0, supports_effort=False,
+        ),
+        ModelInfo(
+            id="qwen3:14b", provider="ollama",
+            context_window=40_960, max_output=16_384,
+            input_price=0.0, output_price=0.0, supports_effort=False,
+        ),
+        ModelInfo(
+            id="gpt-oss:20b", provider="ollama",
+            context_window=131_072, max_output=32_768,
+            input_price=0.0, output_price=0.0, supports_effort=False,
+        ),
+        ModelInfo(
+            id="gemma3:4b", provider="ollama",
+            context_window=131_072, max_output=16_384,
+            input_price=0.0, output_price=0.0, supports_effort=False,
+        ),
+        ModelInfo(
+            id="gemma3:12b", provider="ollama",
+            context_window=131_072, max_output=16_384,
+            input_price=0.0, output_price=0.0, supports_effort=False,
+        ),
     )
 }
+
+for _model in TypeAdapter(list[ModelInfo]).validate_json(
+    Path(__file__).with_name("openrouter_models.json").read_bytes()
+):
+    _MODELS[_model.id] = _model
 
 
 def register(info: ModelInfo) -> None:

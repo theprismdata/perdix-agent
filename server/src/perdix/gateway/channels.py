@@ -12,6 +12,7 @@ from pydantic.alias_generators import to_camel
 from perdix.gateway.config import GatewaySecrets
 from perdix.gateway.events import Job
 from perdix.gateway.runtime import GatewayRuntime, SubmitRequest
+from perdix.gateway.telegram_models import ModelCommand, ModelReply, callback_reply, model_reply
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,27 @@ class TelegramMessage(BaseModel):
     text: str = ""
 
 
+class TelegramButtonMessage(BaseModel):
+    chat: TelegramIdentity
+    message_id: int
+
+
+class TelegramCallback(BaseModel):
+    id: str
+    sender: TelegramIdentity = Field(alias="from")
+    data: str = ""
+    message: TelegramButtonMessage | None = None
+
+
+class TelegramModelTarget(BaseModel):
+    chat_id: int
+    message_id: int | None = None
+
+
 class TelegramUpdate(BaseModel):
     update_id: int
     message: TelegramMessage | None = None
+    callback_query: TelegramCallback | None = None
 
 
 class TelegramEnvelope(BaseModel):
@@ -182,7 +201,68 @@ class GatewayChannels:
             if response.json().get("ok") is not True:
                 raise ValueError("Telegram 알림이 거절되었습니다")
 
+    async def send_model_reply(self, target: TelegramModelTarget, reply: ModelReply) -> None:
+        if not self.secrets.telegram:
+            return
+        method = "editMessageText" if target.message_id is not None else "sendMessage"
+        payload = {
+            **target.model_dump(exclude_none=True), "text": reply.text,
+            "reply_markup": {"inline_keyboard": [
+                [button.model_dump() for button in row] for row in reply.inline_keyboard
+            ]},
+        }
+        response = await self.http.post(
+            f"https://api.telegram.org/bot{self.secrets.telegram.get_secret_value()}/{method}",
+            json=payload,
+        )
+        result = response.json()
+        if "message is not modified" in str(result.get("description", "")):
+            return
+        response.raise_for_status()
+        if result.get("ok") is not True:
+            raise ValueError("Telegram 모델 메뉴 전송이 거절되었습니다")
+
+    async def handle_model_callback(self, update: TelegramUpdate) -> None:
+        callback = update.callback_query
+        config = self.runtime.config.telegram
+        if not callback or not config or not self.secrets.telegram:
+            return
+        message = callback.message
+        if (message is None or callback.sender.id not in config.allowed_user_ids
+                or message.chat.id not in config.allowed_chat_ids):
+            reply = ModelReply(text="이 모델 메뉴를 사용할 수 없습니다.", alert=True)
+        else:
+            reply = await callback_reply(self.runtime, ModelCommand(
+                f"telegram:{message.chat.id}:{callback.sender.id}",
+                callback.data, update.update_id,
+            ))
+        response = await self.http.post(
+            f"https://api.telegram.org/bot{self.secrets.telegram.get_secret_value()}/answerCallbackQuery",
+            json={"callback_query_id": callback.id, "show_alert": reply.alert,
+                  "text": reply.text[:180] if reply.alert else ""},
+        )
+        response.raise_for_status()
+        if response.json().get("ok") is not True:
+            raise ValueError("Telegram 버튼 확인이 거절되었습니다")
+        if not reply.alert and message is not None:
+            await self.send_model_reply(TelegramModelTarget(
+                chat_id=message.chat.id, message_id=message.message_id,
+            ), reply)
+
+    async def conversation_project(self, conversation: str) -> str | None:
+        projects = self.runtime.config.projects
+        if len(projects) == 1:
+            return next(iter(projects))
+        return next((
+            job.project for job in await self.runtime.store.jobs()
+            if job.source == "telegram" and job.source_id
+            and job.source_id.startswith(conversation + ":") and job.project in projects
+        ), None)
+
     async def handle_telegram(self, update: TelegramUpdate) -> None:
+        if update.callback_query is not None:
+            await self.handle_model_callback(update)
+            return
         config = self.runtime.config.telegram
         message = update.message
         if not config or not message:
@@ -193,19 +273,27 @@ class GatewayChannels:
         ):
             return
         chat_id = message.chat.id
+        conversation = f"telegram:{chat_id}:{message.sender.id}"
         command, _, arguments = message.text.strip().partition(" ")
         command = command.split("@")[0]
         match command:
+            case "/model":
+                project = await self.conversation_project(conversation)
+                if project is None:
+                    await self.send_telegram(
+                        chat_id, "먼저 /run 프로젝트 질문 으로 대화할 프로젝트를 선택하세요.",
+                    )
+                else:
+                    reply = await model_reply(
+                        self.runtime, project,
+                        ModelCommand(conversation, arguments, update.update_id),
+                    )
+                    await self.send_model_reply(TelegramModelTarget(chat_id=chat_id), reply)
             case "/run":
                 project, _, prompt = arguments.partition(" ")
                 source_id = f"telegram:{chat_id}:{message.sender.id}:{update.update_id}"
-                job = await self.runtime.submit(
+                await self.runtime.submit(
                     SubmitRequest(project=project, prompt=prompt), "telegram", source_id
-                )
-                await self.send_telegram(
-                    chat_id,
-                    f"작업을 접수했습니다.\n작업 ID: {job.id}\n"
-                    "승인이 필요하면 웹 대시보드에서 처리하세요.",
                 )
             case "/projects":
                 await self.send_telegram(
@@ -232,9 +320,28 @@ class GatewayChannels:
                         f"작업 상태: {owned_job.status}\n{owned_job.result[:3500]}",
                     )
             case _:
+                prompt = message.text.strip()
+                if not prompt:
+                    return
+                if not prompt.startswith("/"):
+                    projects = self.runtime.config.projects
+                    conversation_project = await self.conversation_project(conversation)
+                    if conversation_project is not None:
+                        await self.runtime.submit(
+                            SubmitRequest(project=conversation_project, prompt=prompt), "telegram",
+                            f"telegram:{chat_id}:{message.sender.id}:{update.update_id}",
+                        )
+                        return
+                    await self.send_telegram(
+                        chat_id, "어느 프로젝트에서 대화할까요?\n"
+                        + "\n".join(projects)
+                        + "\n처음 한 번 /run 프로젝트 질문 으로 보내주세요.",
+                    )
+                    return
                 await self.send_telegram(
                     chat_id,
-                    "사용법:\n/projects\n/run 프로젝트 작업 내용\n/status 작업ID\n/cancel 작업ID",
+                    "사용법:\n/projects\n/run 프로젝트 작업 내용\n/model\n"
+                    "/status 작업ID\n/cancel 작업ID",
                 )
 
     async def poll_telegram(self) -> None:
@@ -279,9 +386,7 @@ class GatewayChannels:
         try:
             if job.source == "telegram" and job.source_id:
                 chat_id = int(job.source_id.split(":")[1])
-                await self.send_telegram(
-                    chat_id, f"작업 {job.id}\n상태: {job.status}\n{job.result[:12000]}"
-                )
+                await self.send_telegram(chat_id, job.result[:12000])
             github = self.runtime.config.github
             if (
                 job.source == "github"

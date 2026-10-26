@@ -18,16 +18,18 @@ const APPROVAL_OPTS_SMART_DENY = ['once', 'deny'] as const
 const approvalLabels = (): Record<ApprovalChoice, string> => {
   const p = messages().prompt.approval
 
-  return { always: p.always, deny: p.deny, once: p.once, session: p.session }
+  return { always: p.always, deny: p.deny, once: p.once, session: p.session,
+    yolo: 'YOLO — 이 세션의 모든 도구 허용' }
 }
 
 const CMD_PREVIEW_LINES = 10
 
-type ApprovalChoice = 'always' | 'deny' | 'once' | 'session'
+type ApprovalChoice = 'always' | 'deny' | 'once' | 'session' | 'yolo'
 
 export function approvalOptions(req: ApprovalReq): readonly ApprovalChoice[] {
   if (req.choices) {
-    return req.choices.filter((choice): choice is ApprovalChoice => APPROVAL_OPTS.includes(choice as ApprovalChoice))
+    return req.choices.filter((choice): choice is ApprovalChoice =>
+      choice === 'once' || choice === 'session' || choice === 'always' || choice === 'deny' || choice === 'yolo')
   }
 
   if (req.smartDenied) {

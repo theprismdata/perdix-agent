@@ -21,7 +21,7 @@ from perdix.memory.schema import (
     RawMemory,
 )
 from perdix.memory.source import MemorySource, eligible_source
-from perdix.session.store import EventStore
+from perdix.session.store import Event, EventStore
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,13 @@ key는 입력의 key 중에서 선택하세요. 각 sources에는 같은 key와 
 
 
 class MemoryWorker:
-    def __init__(self, store: EventStore, config: MemoryConfig) -> None:
+    def __init__(self, store: EventStore, config: MemoryConfig,
+                 session_provider: Callable[[str, list[Event]], Provider] | None = None) -> None:
         self.store = store
         self.config = config
         self.archive = MemoryArchive(config.root)
         self.generator = MemoryGenerator(config)
+        self._session_provider = session_provider
         self._task: asyncio.Task[None] | None = None
         self._cooldown_until = 0.0
 
@@ -138,10 +140,16 @@ class MemoryWorker:
         self, source: MemorySource, snapshot: MemorySnapshot,
         provider_for: Callable[[str], Provider],
     ) -> MemorySnapshot:
+        session_provider = self._session_provider
+        events = await self.store.events(source.record.id) if session_provider is not None else []
+
+        def get_provider(model: str) -> Provider:
+            return (session_provider(model, events) if session_provider is not None
+                    else provider_for(model))
         raw = self.archive.raw(source.source_id)
         if raw is None:
             result = await self.generator.generate(
-                provider_for(self.config.extract_model or source.record.model),
+                get_provider(self.config.extract_model or source.record.model),
                 GenerationRequest(_EXTRACT, source.text), Extraction,
             )
             raw = RawMemory(
@@ -158,7 +166,7 @@ class MemoryWorker:
                 sources=[raw.source_id],
             ) for fact in raw.extraction.facts]
             result_view = await self.generator.generate(
-                provider_for(self.config.consolidation_model or source.record.model),
+                get_provider(self.config.consolidation_model or source.record.model),
                 GenerationRequest(_CONSOLIDATE, json.dumps(
                     [entry.model_dump() for entry in entries + new], ensure_ascii=False
                 )),

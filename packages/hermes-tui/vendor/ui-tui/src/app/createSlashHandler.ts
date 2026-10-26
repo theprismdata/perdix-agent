@@ -65,7 +65,7 @@ export function createSlashHandler(ctx: SlashHandlerContext): (cmd: string, type
 
     const runCtx: SlashRunCtx = { ...ctx, flight, guarded, guardedErr, sid, stale, ui }
 
-    if (ui.info?.provider === 'Perdix' && ['login', 'logout', 'auth'].includes(parsed.name)) {
+    if (ui.info?.provider === 'Perdix' && ['login', 'logout'].includes(parsed.name)) {
       countTyped()
       void runPerdixAuth(parsed.name, parsed.arg, runCtx)
       return true

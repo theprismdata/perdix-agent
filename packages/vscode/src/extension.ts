@@ -15,8 +15,8 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
       initialInfo: {
         sessionId: "",
         cwd: initialCwd,
-        currentMode: "chat",
-        modes: [{ id: "chat", name: "기본 에이전트 · Chat" }],
+        currentMode: "general",
+        modes: [{ id: "general", name: "기본 에이전트 · General" }],
         currentModel: null,
         models: [],
       },
@@ -27,7 +27,7 @@ class ChatView implements vscode.WebviewViewProvider, vscode.Disposable {
         try {
           return sessionId
             ? await connection.loadSession({ cwd, sessionId })
-            : await connection.newSession({ cwd, mode: "chat" });
+            : await connection.newSession({ cwd, mode: "general" });
         } catch (error) { await connection.close(); throw error; }
       },
     });

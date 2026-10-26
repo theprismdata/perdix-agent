@@ -33,12 +33,12 @@
 |---|---|---|
 | C→A | `initialize` | capability 협상. 클라이언트는 `fs`, `terminal`, `elicitation.form` 지원을 광고. 서버는 `loadSession: true`, `sessionCapabilities.list`를 광고 |
 | C→A | `authenticate` | `methodId: openai-chatgpt`. API 키가 있으면 로그인 생략, 없으면 서버가 ChatGPT OAuth를 수행. `initialize.authMethods`로 광고 |
-| C→A | `session/new` | cwd, mcpServers 수신 → Session 생성. 응답에 `modes`(chat/plan/build)와 `configOptions`(model 등). 세션별 덮어쓰기는 `_meta.perdix` |
+| C→A | `session/new` | cwd, mcpServers 수신 → Session 생성. 응답에 `modes`(general/plan/build)와 `configOptions`(model 등). 세션별 덮어쓰기는 `_meta.perdix` |
 | C→A | `session/load` | event log 복구 + 히스토리 리플레이 |
 | C→A | `session/list` | 세션 목록(재개 UI) |
 | C→A | `session/prompt` | Turn 실행 또는 `/loop` 제어. 응답에 `stopReason`(harness-loop.md §6) |
 | C→A | `session/cancel` | 알림. Turn 취소 후 prompt에 `cancelled`로 정상 응답 |
-| C→A | `session/set_mode` | chat / plan / build. 메인 모델의 `switch_mode` 자동 전환도 동일한 기록·`current_mode_update`를 사용. 역할별 모델 할당이 있으면 `config_option_update`도 통지 |
+| C→A | `session/set_mode` | general / plan / build. 메인 모델의 `switch_mode` 자동 전환도 동일한 기록·`current_mode_update`를 사용. 역할별 모델 할당이 있으면 `config_option_update`도 통지 |
 | C→A | `session/set_config_option` | 모델 전환(`category: model`), `memory_use` / `memory_generate` (`on` / `off`), `openrouter_catalog=refresh` 목록 조회, `agent_model_<role>=<model ID>` 역할 할당 저장. 메모리 설정은 `config_change`에 보존한다. 결과는 `config_option_update`로 통지 |
 | A→C | `session/update` | `user_message_chunk`(리플레이), `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `plan`, `available_commands_update`, `current_mode_update`, `config_option_update`, `usage_update`, `session_info_update` |
 | A→C | `session/request_permission` | 권한 `ask`. **`toolCall` 필수**이므로 도구 호출 맥락에서만. verify 명령은 합성 `tool_call`을 먼저 보낸다. 옵션 kind: `allow_once / allow_always / reject_once / reject_always`. `outcome: cancelled` 처리 필수 |
@@ -47,6 +47,15 @@
 | A→C | `terminal/*` | 옵션. 로컬 sandbox 결과에는 `terminal` 콘텐츠를 쓰지 않는다(클라이언트가 만든 terminalId가 필요) |
 
 `usage_update`의 필드는 `used`/`size`(현재 컨텍스트 점유 토큰/창 크기)와 선택적 `cost`다. 턴별 입력/출력 토큰이 아니다. 턴별 토큰은 내부 `usage` 테이블에만 기록한다.
+
+인증 프로필도 표준 `session/set_config_option`을 사용한다.
+`auth_profile_anthropic`, `auth_profile_openai`, `auth_profile_gemini`,
+`auth_profile_openrouter`의 값은 프로필 이름 또는 `legacy`다. 새 대화는 제공자별 기본
+선택을 `config_change`로 기록하고 load 시 복원한다. 실행 중 변경은 거절한다.
+`config_option_update`에는 네 제공자의 선택지와 저장 상태를 포함하고 비밀은 보내지 않는다.
+`/auth list`, `/auth status`, `/auth use <제공자> <프로필>`은 표준 prompt 텍스트로
+처리하며 사용자 메시지·모델 입력에 인증 명령을 저장하지 않는다.
+역할별 `auth_profile`은 대화 선택보다 우선하며 불일치·만료 시 다른 계정으로 우회하지 않는다.
 
 ### 1.2 확장 (`_meta.perdix` 및 `_perdix/` 접두)
 표준에 있는 기능(세션 목록, 설정 옵션, 사용량, 질문)은 모두 표준 메서드를 쓴다. 확장은 아래로 한정한다.
@@ -71,12 +80,23 @@ SDK 구현 메모:
 | 모드 | 의미 | 용도 |
 |---|---|---|
 | `interactive` (기본) | `ask` → `session/request_permission` | TUI |
+| `yolo` | 모든 도구를 승인 요청 없이 allow (명시적 deny 규칙도 우회) | 사용자 명시적 전체 승인 |
 | `deny` | 내장 읽기 전용 기본값만 allow, 나머지 전부 deny | CI 분석 |
 | `accept-edits` | `edit`/`write` allow, `bash` 등은 규칙대로(ask는 deny 처리) | 헤드리스 구현 |
 | `allowlist` | 설정의 `allow` 규칙 적용, 나머지 deny. **신뢰된 프로젝트에서만** | CI build 모드 |
 
 헤드리스(`perdix -p`)의 기본은 `deny`. 거부된 호출은 `is_error("non-interactive: permission required")`.
 새로 클론한 저장소를 CI에서 돌리려면 `--trust-project`를 함께 준다.
+
+`perdix --permission-mode yolo`로 시작하면 수정·명령 실행을 매번 묻지 않는다.
+헤드리스에서도 `perdix -p "작업 요청" --permission-mode yolo`로 지정한다.
+입력 스키마 검증, 실행 샌드박스, 작업 모드별 도구 제한과 프로젝트 신뢰 게이트는 유지한다.
+대화형 실행에서는 승인 화면의 `YOLO — 이 세션의 모든 도구 허용`을 선택하면
+현재 요청부터 세션 전체에 적용된다. `/permissions yolo`로 켜거나
+`/permissions interactive`로 끌 수도 있다. 표준 `session/set_config_option`의
+`permission_mode` select로도 변경할 수 있다. 선택은 event log에 append하고 복원한다.
+서버 시작 모드가 `deny`/`accept-edits`/`allowlist`이면 런타임 선택으로 완화할 수 없다.
+세션 생성 메타데이터로 기존 권한을 완화하는 것도 허용하지 않는다.
 
 ### 1.4 목표 루프 명령
 

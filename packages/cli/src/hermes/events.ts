@@ -14,6 +14,10 @@ export interface HermesMessage {
 export function approvalOptions(request: PermissionRequest): Map<string, string> {
   const choices = new Map<string, string>();
   for (const option of request.options) {
+    if (option.optionId === "yolo") {
+      choices.set("yolo", option.optionId);
+      continue;
+    }
     switch (option.kind) {
       case "allow_once": choices.set("once", option.optionId); break;
       case "allow_always": choices.set("always", option.optionId); break;

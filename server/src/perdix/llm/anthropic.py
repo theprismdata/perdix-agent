@@ -205,18 +205,22 @@ class AnthropicProvider:
         *,
         api_key: str | None = None,
         auth_token: str | None = None,
+        profile: str | None = None,
     ) -> None:
         self.model = model
         self._client = client
         self._api_key = api_key
         self._auth_token = auth_token
+        self._profile = profile
 
     @property
     def client(self) -> anthropic.AsyncAnthropic:
         if self._client is None:
             # 재시도는 하네스가 첫 청크 기준으로 소유하므로(harness-loop.md §3.5)
             # SDK 자체 재시도를 끈다. 켜 두면 재시도 횟수가 곱해진다.
-            if self._auth_token:
+            if self._profile is not None:
+                self._client = anthropic.AsyncAnthropic(max_retries=0, profile=self._profile)
+            elif self._auth_token:
                 # OAuth 토큰은 Bearer로 보내고, oauth beta 헤더가 있어야 받아들여진다.
                 # 키와 토큰이 둘 다 있으면 토큰을 쓴다(구독 과금 경로 우선).
                 self._client = anthropic.AsyncAnthropic(

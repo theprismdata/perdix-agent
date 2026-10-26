@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 Decision = Literal["allow", "ask", "deny"]
-PermissionMode = Literal["interactive", "deny", "accept-edits", "allowlist"]
+PermissionMode = Literal["interactive", "deny", "accept-edits", "allowlist", "yolo"]
 Rule = Decision | dict[str, Decision]
 
 DEFAULT_RULES: dict[str, Rule] = {
@@ -178,6 +178,8 @@ class PermissionPolicy:
         return _match_patterns(rule, subject)
 
     def evaluate(self, tool_name: str, input: Mapping[str, Any]) -> Decision:
+        if self.mode == "yolo":
+            return "allow"
         decision = self._resolve(tool_name, input)
         if self.mode == "interactive":
             return decision

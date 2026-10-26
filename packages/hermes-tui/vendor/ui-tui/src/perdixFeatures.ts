@@ -19,7 +19,7 @@ export const PERDIX_FEATURES = {
   voice: false,
   pet: false,
   billing: false,
-  images: false,
+  images: true,
   pathCompletion: false,
   shell: false,
   settings: false,
@@ -48,6 +48,7 @@ const COMMAND_FEATURES: Readonly<Record<string, PerdixFeature>> = {
 };
 
 export function commandEnabled(name: string, perdix?: boolean): boolean {
+  if (name === 'paste' && (perdix ?? process.env.HERMES_TUI_PERDIX === '1')) return false;
   if (name === 'assign') return perdix ?? process.env.HERMES_TUI_PERDIX === '1';
   const feature = COMMAND_FEATURES[name];
   return feature === undefined || featureEnabled(feature, perdix);

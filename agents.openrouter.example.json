@@ -6,7 +6,7 @@
     "search": { "provider": "openrouter", "model": "google/gemini-3.8-flash" }
   },
   "agents": {
-    "chat": { "model": "economy" },
+    "general": { "model": "economy" },
     "plan": { "model": "review", "effort": "high" },
     "build": { "model": "economy" },
     "explore": { "model": "economy" },

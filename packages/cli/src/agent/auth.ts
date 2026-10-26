@@ -7,6 +7,7 @@
  */
 import { spawn } from "node:child_process";
 import { setProviderApiKey, providerStatus, removeProvider } from "./credentials.js";
+import { runProfileAuth } from "./auth-profiles.js";
 import { findOnPath, resolveServerCommand } from "./spawn.js";
 
 const INSTALL_HELP = `'ant' CLI를 찾을 수 없습니다. 설치 후 다시 시도하세요.
@@ -25,6 +26,11 @@ const INSTALL_HELP = `'ant' CLI를 찾을 수 없습니다. 설치 후 다시 �
 
 export const AUTH_USAGE = `Usage: perdix auth <action> [--provider anthropic|openai|gemini|openrouter]
 
+  login --provider <제공자> --profile <이름> [--api-key <키>]  이름 있는 인증 등록
+  list                       모든 제공자의 프로필과 기본 선택 조회
+  use --provider <제공자> --profile <이름|legacy>  새 대화의 기본 인증 선택
+  status|logout --provider <제공자> --profile <이름>  프로필 조회·로그아웃
+
   login                       로그인/키 등록
     --provider anthropic        브라우저로 Anthropic 계정 로그인 (ant auth login 위임, 기본값)
     --provider openai [--api-key <key>]   API 키 등록 또는 키가 없으면 ChatGPT 로그인
@@ -33,7 +39,7 @@ export const AUTH_USAGE = `Usage: perdix auth <action> [--provider anthropic|ope
   status [--provider ...]     현재 활성 자격 증명 확인 (provider 생략 시 anthropic)
   logout [--provider ...]     로그인/저장된 키 해제
 
-ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY가 설정되어 있으면 저장된 프로필·키보다 항상 우선합니다.
+명명 프로필은 해당 인증만 사용합니다. legacy에서는 기존 환경변수 우선순위를 유지합니다.
 `;
 
 export interface RunAuthOptions {
@@ -136,6 +142,13 @@ export async function runAuthCommand(
   opts: RunAuthOptions = {},
 ): Promise<number> {
   const env = opts.env ?? process.env;
+  if (args.includes("--profile") || args[0] === "list" || args[0] === "use"
+      || args[0] === "status") {
+    return runProfileAuth(args, {
+      ...opts, env,
+      onOutput: opts.onOutput ?? ((text: string) => { process.stdout.write(text); }),
+    });
+  }
   if (args[0] === "help" || args[0] === "--help" || args[0] === "-h") {
     process.stdout.write(AUTH_USAGE);
     return 0;

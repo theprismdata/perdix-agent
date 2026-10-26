@@ -26,6 +26,10 @@ Perdix가 작성한 코드는 `src/launch.ts`, `scripts/build.mjs` 및 CLI의 `s
 Perdix 연결의 테스트·린트는 자체 코드에서 수행한다.
 
 `ui-tui/src/perdixFeatures.ts`는 미연결 기능의 기본 플래그를 `false`로 유지한다.
+이미지는 CLI 변환 계층의 파일·클립보드 첨부와 ACP 이미지 블록 전송을 연결해 활성화했다.
+Perdix의 `/paste` 명령은 숨기고 기본 붙여넣기를 제공한다. macOS 기본 Terminal의 이미지 전용
+클립보드는 CLI의 `src/hermes/macos-image-paste.ts`가 기존 파일 드롭 경로에 연결한다.
+`ui-tui/src/app/submissionCore.ts`는 이미지 단독 전송의 빈 설명을 보존한다.
 Perdix 실행기의 `HERMES_TUI_PERDIX=1`에서 명령·단축키·하위 메뉴·RPC 요청을 제한한다.
 명령 처리, 모델 선택, 세션 선택, 화면 구성, 자동완성, 요청 전송과 상태 폴링에
 플래그 검사를 추가했으며 원본 Hermes 실행의 동작과 구현은 보존한다.

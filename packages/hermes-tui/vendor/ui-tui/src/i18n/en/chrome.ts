@@ -38,7 +38,7 @@ export const chromeEn = {
     exit: 'exit',
     openEditor: 'open $EDITOR (Alt+G fallback for VSCode/Cursor)',
     redraw: 'redraw / repaint',
-    paste: 'paste text; /paste attaches clipboard image',
+    paste: 'paste text or attach a clipboard image',
     discardDraft: 'discard draft (recall with ↑)',
     applyCompletion: 'apply completion',
     arrows: 'completions / queue edit / history',

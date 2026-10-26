@@ -1,12 +1,14 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import type { LoadSessionOptions, NewSessionOptions } from "../agent/connection.js";
 import type { AgentEvent, PermissionAnswer, PermissionRequest, SessionHandle, SessionListItem } from "../agent/types.js";
 import { VERSION } from "../version.js";
 import type { AuthAction, AuthProvider, HermesAuthResult } from "./auth.js";
 import { approvalOptions, toolResultText, type HermesEvent, type HermesMessage } from "./events.js";
+import { droppedImagePath, MAX_IMAGES, readClipboardImage, readImage, type AttachedImage } from "./images.js";
 
 const sessionParams = z.object({ session_id: z.string().min(1) });
-const promptParams = sessionParams.extend({ text: z.string().min(1) });
+const promptParams = sessionParams.extend({ text: z.string() });
 const configParams = z.object({ key: z.string(), value: z.unknown(), session_id: z.string().optional() });
 const slashParams = sessionParams.extend({ command: z.string() });
 const COMMANDS = [
@@ -14,13 +16,15 @@ const COMMANDS = [
   ["/help", "연결된 명령 안내"], ["/new", "새 대화"],
   ["/sessions", "저장된 대화 선택·복원"],
   ["/model", "모델 선택"], ["/agent", "Perdix 모드 조회·변경"],
+  ["/permissions", "권한 모드 조회·변경 (interactive | yolo)"],
   ["/assign", "OpenRouter 모델을 에이전트에 할당"],
   ["/status", "현재 세션 상태"], ["/usage", "서버가 보고한 컨텍스트 사용량"],
   ["/cancel", "진행 중 작업 취소"],
+  ["/image", "이미지 파일 첨부: /image <경로>"],
   ["/save", "자동 저장과 복원 안내"], ["/loop", "Perdix 목표 루프"],
   ["/memories", "Perdix 메모리"], ["/theme", "auto | light | dark"],
   ["/redraw", "화면 다시 그리기"], ["/copy", "응답 복사"], ["/quit", "종료"],
-  ["/login", "공급자 로그인·API 키 등록"], ["/logout", "공급자 로그아웃"], ["/auth", "인증 상태 확인"],
+  ["/login", "공급자 로그인·API 키 등록"], ["/logout", "공급자 로그아웃"], ["/auth", "status | list | use <제공자> <프로필|legacy>"],
 ] as const;
 
 const COMMAND_ALIASES: Readonly<Record<string, string>> = {
@@ -29,6 +33,7 @@ const COMMAND_ALIASES: Readonly<Record<string, string>> = {
 };
 
 interface LiveSession {
+  readonly images: Map<string, AttachedImage>;
   readonly handle: SessionHandle;
   readonly history: HermesMessage[];
   readonly tools: Map<string, { name: string; result: string; complete: boolean }>;
@@ -45,6 +50,7 @@ export interface HermesAdapterOptions {
   readonly cwd: string;
   readonly mode?: string;
   readonly model?: string;
+  readonly readClipboardImage?: () => Promise<AttachedImage>;
   readonly runAuth?: (action: AuthAction, provider: AuthProvider | undefined, signal: AbortSignal) => Promise<HermesAuthResult>;
   readonly reconnect?: (signal: AbortSignal) => Promise<HermesConnection>;
 }
@@ -169,7 +175,7 @@ export class HermesAdapter {
   }
 
   private attach(handle: SessionHandle, replaying: boolean): LiveSession {
-    const session: LiveSession = { handle, history: [], tools: new Map(), unsubscribe: () => {},
+    const session: LiveSession = { handle, history: [], tools: new Map(), images: new Map(), unsubscribe: () => {},
       unpermission: () => {}, replaying, busy: false, text: "", error: null, usage: null };
     const id = handle.info.sessionId;
     this.sessions.set(id, session);
@@ -193,6 +199,14 @@ export class HermesAdapter {
   }
 
   private readonly permissionChoices = new Map<string, Map<string, string>>();
+
+  private attachImage(session: LiveSession, attached: AttachedImage, remainder = ""): Record<string, unknown> {
+    if (session.busy) throw new HermesRpcError(-32602, "작업이 끝난 뒤 이미지를 첨부하세요.");
+    if (session.images.size >= MAX_IMAGES) throw new HermesRpcError(-32602, "이미지는 한 번에 4장까지 첨부할 수 있습니다.");
+    const path = `attachment:${randomUUID()}`;
+    session.images.set(path, attached);
+    return { path, name: attached.name, remainder, count: session.images.size, attached: true };
+  }
 
   answerPermission(id: string, result: unknown): void {
     const resolve = this.pendingPermissions.get(id);
@@ -237,12 +251,12 @@ export class HermesAdapter {
           sub: { "/agent": session?.handle.info.modes.map(mode => mode.id) ?? [],
             "/team": ["status", "stop", "leave", "help"],
             "/mode": session?.handle.info.modes.map(mode => mode.id) ?? [],
+            "/permissions": ["interactive", "yolo", "deny", "accept-edits", "allowlist"],
             "/model": session?.handle.info.models.map(model => model.value) ?? [],
             "/theme": ["auto", "light", "dark"], "/loop": ["status", "cancel"],
             "/login": ["openai", "anthropic", "gemini", "openrouter"], "/logout": ["openai", "anthropic", "gemini", "openrouter"], "/auth": ["status openai", "status anthropic", "status gemini", "status openrouter"],
             "/memories": ["use on", "use off", "generate on", "generate off"] }, skill_count: 0 };
       }
-      case "input.detect_drop": return { matched: false };
       case "completion.get": return { items: [] };
       case "complete.slash": {
         const { text } = z.object({ text: z.string().default("") }).parse(params);
@@ -292,15 +306,49 @@ export class HermesAdapter {
         return { sessions: sessions.map((item) => ({ id: item.sessionId, title: item.title ?? "", preview: item.title ?? "Perdix 대화",
           started_at: item.updatedAt ? Date.parse(item.updatedAt) / 1000 : 0, source: "Perdix" })) };
       }
+      case "image.attach": {
+        const input = sessionParams.extend({ path: z.string().min(1) }).parse(params);
+        const session = this.session(input.session_id);
+        const dropped = droppedImagePath(input.path);
+        const image = await readImage(dropped?.path ?? input.path, session.handle.info.cwd);
+        return this.attachImage(session, image, dropped?.remainder);
+      }
+      case "image.detach": {
+        const input = sessionParams.extend({ path: z.string() }).parse(params);
+        const session = this.session(input.session_id);
+        return { detached: session.images.delete(input.path), count: session.images.size };
+      }
+      case "image.list": {
+        const session = this.session(sessionParams.parse(params).session_id);
+        return { images: [...session.images].map(([path, image]) => ({ path, name: image.name })) };
+      }
+      case "clipboard.paste": {
+        const session = this.session(sessionParams.parse(params).session_id);
+        const image = await (this.options.readClipboardImage ?? readClipboardImage)();
+        return this.attachImage(session, image);
+      }
+      case "input.detect_drop": {
+        const input = sessionParams.extend({ text: z.string() }).parse(params);
+        const dropped = droppedImagePath(input.text);
+        if (!dropped) return { matched: false };
+        const session = this.session(input.session_id);
+        const image = await readImage(dropped.path, session.handle.info.cwd);
+        const attached = this.attachImage(session, image);
+        return { ...attached, matched: true, is_image: true, text: dropped.remainder };
+      }
+      case "paste.collapse": return { collapsed: false };
       case "prompt.submit": {
         if (this.authenticating) throw new HermesRpcError(-32602, "인증이 끝난 뒤 요청하세요.");
         const { session_id: id, text } = promptParams.parse(params);
         const session = this.session(id);
         if (session.busy) throw new HermesRpcError(-32602, "session busy");
-        session.history.push({ role: "user", text });
+        if (!text.trim() && !session.images.size) throw new HermesRpcError(-32602, "메시지나 이미지를 입력하세요.");
+        const images = [...session.images.values()];
+        session.images.clear();
+        session.history.push({ role: "user", text: [text, ...images.map(image => `[이미지: ${image.name}]`)].filter(Boolean).join("\n") });
         const control = /^\/loop(?:\s+(?:status|cancel))?\s*$/.test(text.trim());
         if (control) this.receive(id, session, { type: "turn_started" });
-        const result = await session.handle.prompt(text);
+        const result = await session.handle.prompt(text, images.map(image => image.image));
         if (control) this.receive(id, session, { type: "turn_ended", stopReason: result.stopReason });
         return { status: "ok" };
       }
@@ -448,7 +496,7 @@ export class HermesAdapter {
           this.publish(id, "session.info", this.info(session));
           return { output: `모델 변경: ${session.handle.info.currentModel}` };
         }
-        if (name === "loop" || name === "memories" || name === "team") {
+        if (name === "loop" || name === "memories" || name === "team" || name === "auth" || name === "permissions") {
           if (name === "loop" && argument === "cancel" && session.busy) return this.request("slash.exec", { session_id: id, command: "cancel" });
           if (session.busy) throw new HermesRpcError(-32602, "작업이 끝난 뒤 명령을 실행하세요. 취소는 /cancel을 사용하세요.");
           const text = `/${name}${argument ? ` ${argument}` : ""}`;

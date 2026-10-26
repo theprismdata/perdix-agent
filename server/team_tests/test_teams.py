@@ -305,7 +305,8 @@ const prompts = [];
 let resolveReady;
 const ready = new Promise(resolve => {resolveReady = resolve;});
 const handle = {
-  info: {sessionId:'qa',cwd:process.cwd(),currentMode:'chat',modes:[],currentModel:null,models:[]},
+  info: {sessionId:'qa',cwd:process.cwd(),currentMode:'general',
+    modes:[],currentModel:null,models:[]},
   prompt: async text => {prompts.push(text); return {stopReason:'end_turn'};},
   onEvent: () => {resolveReady(); return () => {};}, onPermission: () => () => {},
   cancel:async()=>{},close:async()=>{},setMode:async()=>{},setModel:async()=>{},
