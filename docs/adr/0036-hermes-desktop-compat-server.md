@@ -70,6 +70,14 @@ ESM + `@hermes/plugin-sdk`)을 쓴다. 앱 소스는 수정하지 않는다.
 (`[data-slot="aui_intro"] .wordmark`)를 숨기기만 한다. 아래의 짧은 안내 문장은 그대로 둔다. Hermes의 DOM 구조가
 바뀌면 글자가 다시 보일 뿐 기능에는 영향이 없다. 창 제목, 설정 문구 등 다른 `Hermes` 표기는 바꾸지 않았다.
 
+## 쓰지 않는 사이드바 항목 숨기기 (추가 결정)
+
+`Messaging`(메신저 연결), `Artifacts`(생성 결과물), `Scheduled jobs`(예약 작업)는 Perdix에 해당 기능이 없어 눌러도
+늘 비어 있다. 플러그인이 Hermes가 공식으로 제공하는 `sidebarNav.prefs` 영역에 `hide: [messaging, artifacts, cron]`을
+등록해 숨긴다(앱 소스 수정 없음, 플러그인을 끄면 다시 나타난다). `Capabilities`는 Plugins 탭으로 가는 길이라
+Hermes가 숨기지 못하게 막아 두었고 Perdix도 Skills(Langflow 플로우)와 Plugins 때문에 남긴다.
+나중에 예약 실행 같은 기능이 생기면 `hide` 목록에서 빼면 된다.
+
 ## Langflow 화면의 홍보 요소 숨기기 (추가 결정)
 
 Langflow 화면에는 상단의 GitHub 별·Discord 인원 표시, 왼쪽 `Get started` 안내(Star repo, Join the

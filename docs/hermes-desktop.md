@@ -56,6 +56,12 @@ Langflow는 UI를 포함해 띄워야 한다(`langflow run`, `--backend-only` �
 ([README](../packages/langflow-ui/README.md)). 화면을 바꾼 뒤에는 이미 열려 있는 Hermes 앱의
 Langflow 페이지가 이전 문서를 붙잡고 있을 수 있으니 Hermes 앱을 다시 시작한다. 플러그인은 Hermes 앱을 수정하지 않는 공식 확장 방식이다.
 
+## 사이드바
+
+플러그인이 `Messaging`, `Artifacts`, `Scheduled jobs`를 숨긴다(Perdix에 없는 기능). 남는 항목은 `New session`,
+`Capabilities`(Skills의 Langflow 플로우, Plugins), `Langflow`다. 다시 보이게 하려면
+`packages/cli/src/hermes/langflow-plugin.ts`의 `hide` 목록에서 빼고 서버를 다시 시작한다.
+
 ## Bots 탭 끄기
 
 사이드바의 `BOTS`는 Hermes의 Bot Mode(프로필을 봇 명단으로 보여 주는 기능)이고 Perdix에는 프로필이 없어

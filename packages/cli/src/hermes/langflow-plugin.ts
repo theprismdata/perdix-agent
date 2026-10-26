@@ -122,12 +122,15 @@ function watchSplash(ctx) {
 export default {
   id: 'langflow',
   name: 'Langflow',
-  description: 'Perdix 연결용: Langflow 편집 화면을 사이드바 항목으로 열고, 첫 화면의 큰 글자를 숨깁니다.',
+  description: 'Perdix 연결용: Langflow 편집 화면을 사이드바 항목으로 열고, 쓰지 않는 항목과 첫 화면의 큰 글자를 숨깁니다.',
   register(ctx) {
     rest = ctx.rest
     watchSplash(ctx)
     void refresh()
     ctx.register({ id: 'page', area: 'routes', title: 'Langflow', data: { path: PATH }, render: () => jsx(Page, {}) })
+    // Perdix에 없는 기능이라 늘 비어 있는 사이드바 항목을 숨긴다. Capabilities는 Hermes가 숨기지 못하게 막아 둔다
+    // (Plugins 탭으로 가는 길). 플러그인을 끄면 항목이 다시 나타난다.
+    ctx.register({ id: 'nav-prefs', area: 'sidebarNav.prefs', data: { hide: ['messaging', 'artifacts', 'cron'] } })
     ctx.register({ id: 'nav', area: 'sidebar.nav', data: { codicon: 'type-hierarchy', label: 'Langflow', path: PATH } })
     // 대화창의 /langflow가 Perdix 어댑터에서 이 이벤트를 보낸다.
     ctx.onEvent('perdix.langflow.open', () => { void refresh(); host.navigate(PATH) })
