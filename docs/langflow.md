@@ -46,6 +46,12 @@ cd server && uv run perdix-server --langflow-config /절대/경로/langflow.json
 
 Hermes Desktop 안에서 Langflow 편집 화면(캔버스)을 여는 방법은 [hermes-desktop.md](hermes-desktop.md)를 본다.
 
+## Perdix 판 화면
+
+기본 Langflow 화면에는 GitHub·Discord 표시와 `Get started` 안내가 있다. 이를 뺀 프런트엔드를
+[packages/langflow-ui](../packages/langflow-ui/README.md)로 빌드해 `langflow run --frontend-path`로 쓸 수
+있다(Langflow 소스는 수정하지 않고 공식 `customization` 확장점만 덮어쓴다). 결정: [ADR 0037](adr/0037-langflow-ui-overrides.md).
+
 ## 시험용 Langflow
 
 ```bash

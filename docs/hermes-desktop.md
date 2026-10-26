@@ -51,7 +51,10 @@ cd apps/desktop && ./node_modules/.bin/electron --user-data-dir="$HOME/.perdix/h
 - Langflow가 꺼져 있으면 안내 문구와 `다시 확인` 버튼이 보인다.
 
 Langflow는 UI를 포함해 띄워야 한다(`langflow run`, `--backend-only` 제외). 개인용이면
-`LANGFLOW_AUTO_LOGIN=true`가 편하다. 플러그인은 Hermes 앱을 수정하지 않는 공식 확장 방식이다.
+`LANGFLOW_AUTO_LOGIN=true`가 편하다. GitHub·Discord 표시와 시작 안내가 없는 Perdix 판 화면은
+`packages/langflow-ui/build.sh`로 빌드해 `langflow run --frontend-path ~/.perdix/langflow-ui/build`로 쓴다
+([README](../packages/langflow-ui/README.md)). 화면을 바꾼 뒤에는 이미 열려 있는 Hermes 앱의
+Langflow 페이지가 이전 문서를 붙잡고 있을 수 있으니 Hermes 앱을 다시 시작한다. 플러그인은 Hermes 앱을 수정하지 않는 공식 확장 방식이다.
 
 ## 현재 지원
 
