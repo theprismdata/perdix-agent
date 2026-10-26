@@ -30,6 +30,7 @@ Options:
       --team-db <path>       공유 팀 SQLite 경로
       --resume <sessionId>   Resume a saved session
       --tui <name>          default | hermes (Hermes TUI 평가판)
+      --hermes-desktop      Hermes Desktop 앱이 접속할 호환 서버를 실행(주소·토큰 출력)
       --list                 List saved sessions for the working directory
       --permission-mode <m>  interactive | deny | accept-edits | allowlist | yolo (default with -p: deny)
       --server <cmd>         Server command (overrides PERDIX_SERVER)
@@ -68,6 +69,7 @@ function parseCli(argv: string[]) {
       "team-db": { type: "string" },
       resume: { type: "string" },
       tui: { type: "string", default: "default" },
+      "hermes-desktop": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       "permission-mode": { type: "string" },
       "trust-project": { type: "boolean", default: false },
@@ -233,6 +235,26 @@ async function main(): Promise<number> {
       for (const s of items) {
         process.stdout.write(`${s.sessionId}  ${s.updatedAt ?? "-"}  ${s.title ?? ""}\n`);
       }
+      return 0;
+    }
+
+    if (args["hermes-desktop"]) {
+      const [{ HermesAdapter }, { startHermesDesktopServer }] = await Promise.all([
+        import("./hermes/adapter.js"), import("./hermes/desktop-server.js"),
+      ]);
+      const adapter = new HermesAdapter(connection, { cwd, mode: args.mode, model });
+      const desktop = await startHermesDesktopServer(adapter, {
+        port: Number(process.env.PERDIX_HERMES_DESKTOP_PORT) || undefined, cwd,
+        token: process.env.PERDIX_HERMES_DESKTOP_TOKEN || undefined,
+        log: (line) => { if (args.debug) process.stderr.write(`[hermes-desktop] ${line}\n`); },
+      });
+      process.stdout.write(`HERMES_DESKTOP_REMOTE_URL=${desktop.url}\n`);
+      if (process.env.PERDIX_HERMES_DESKTOP_SHOW_TOKEN === "1") process.stdout.write(`HERMES_DESKTOP_REMOTE_TOKEN=${desktop.token}\n`);
+      await new Promise<void>((resolve) => {
+        process.once("SIGINT", resolve);
+        process.once("SIGTERM", resolve);
+      });
+      await desktop.close();
       return 0;
     }
 
