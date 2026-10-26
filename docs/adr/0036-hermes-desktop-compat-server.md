@@ -80,6 +80,15 @@ Discord 640x512)으로 상단 바 안의 버튼만, 나머지는 `data-testid`�
 숨기기만 하며 Langflow가 별·인원을 가져오는 외부 요청(api.github.com, discord.com)은 막지 않는다.
 Langflow 화면 구조가 바뀌면 숨김이 풀릴 뿐 기능에는 영향이 없다.
 
+## Bots 끄기와 plugins.manage (추가 결정)
+
+`BOTS`(Bot Mode)는 Hermes 프로필 체계에 기대는 기능이라 Perdix에서는 명단을 읽는 `profiles.list`가 지원되지
+않아 쓸 수 없다. Hermes는 플러그인이 다른 플러그인의 활성 상태를 바꾸지 못하게 일부러 막아 두었으므로
+(`host.pluginDecisions`는 읽기 전용) 우리 플러그인이 대신 끄지 않고, 사용자가 `Capabilities → Plugins`의
+스위치로 끈다. 그 화면은 에이전트 플러그인 목록(`plugins.manage` `list`)을 못 받으면 데스크톱 플러그인
+스위치까지 통째로 오류가 나므로, 호환 서버의 어댑터가 `list`에 빈 목록을 답하게 했다. 다른 동작은
+지원하지 않는다고 오류로 답한다.
+
 ## 검증 (2026-10-26)
 
 Hermes Desktop 소스 `63d0b94`를 별도 클론에서 빌드(`npm install`, `npm run build`)해

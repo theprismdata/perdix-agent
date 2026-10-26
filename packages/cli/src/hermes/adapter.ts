@@ -236,6 +236,13 @@ export class HermesAdapter {
   async request(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
       case "gateway.ping": return { pong: true };
+      // Perdix에는 Hermes식 에이전트 플러그인이 없다. 목록만 비어 있다고 답해 Capabilities ▸ Plugins 화면이
+      // 열리게 하고(데스크톱 플러그인 스위치가 거기 있다), 설치·변경 같은 나머지 동작은 지원하지 않는다.
+      case "plugins.manage": {
+        const { action } = z.object({ action: z.string().default("list") }).passthrough().parse(params);
+        if (action === "list") return { plugins: [] };
+        throw new HermesRpcError(-32601, "Perdix는 Hermes 에이전트 플러그인을 지원하지 않습니다.");
+      }
       case "setup.status": return { provider_configured: true };
       case "config.get":
         if (params.key === "mtime") return { mtime: 0, mcp_rev: "" };
