@@ -62,6 +62,15 @@ ESM + `@hermes/plugin-sdk`)을 쓴다. 앱 소스는 수정하지 않는다.
 - Langflow는 UI를 포함해 실행해야 하고(`--backend-only` 아님), 개인용으로 `LANGFLOW_AUTO_LOGIN=true`를
   권장한다. 이때도 `LANGFLOW_API_KEY` 환경변수 인증은 그대로 동작한다.
 
+## 이름 바꾸기 (추가 결정)
+
+새 세션 첫 화면의 큰 글자 `HERMES AGENT`는 Hermes 코어(`components/chat/intro.tsx`)가 상수로 그리며
+플러그인이 대체할 수 있는 영역(`chat.empty`는 이미 있는 빈 세션용)이 아니다. 앱 소스를 고치지 않으려고
+같은 플러그인이 `MutationObserver`로 그려진 글자만 `PERDIX`로 바꾼다. React가 쥔 텍스트 노드의 값만
+바꿔 React의 갱신·제거와 충돌하지 않게 했다. 이 방식은 Hermes의 DOM 구조(`[data-slot="aui_intro"] .wordmark`)에
+의존하므로 그 구조가 바뀌면 글자가 원래대로 보일 뿐 기능은 영향이 없다. 창 제목, 설정 문구 등 다른
+`Hermes` 표기는 아직 바꾸지 않았다.
+
 ## 검증 (2026-10-26)
 
 Hermes Desktop 소스 `63d0b94`를 별도 클론에서 빌드(`npm install`, `npm run build`)해

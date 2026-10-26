@@ -66,12 +66,43 @@ function Page() {
   })
 }
 
+// 새 세션 첫 화면의 큰 글자는 Hermes 코어가 상수로 그린다(플러그인이 대체할 수 있는 영역이 아님).
+// 앱 소스는 건드리지 않고, 그려진 글자만 Perdix로 바꾼다. React가 쥔 텍스트 노드를 그대로 두고
+// 값만 바꿔서 React의 갱신·제거와 충돌하지 않는다.
+const BRAND_FROM = 'HERMES AGENT'
+const BRAND_TO = 'PERDIX'
+
+function rebrand() {
+  for (const wordmark of document.querySelectorAll('[data-slot="aui_intro"] .wordmark')) {
+    if (wordmark.getAttribute('aria-label') === BRAND_FROM) wordmark.setAttribute('aria-label', BRAND_TO)
+    for (const span of wordmark.querySelectorAll('span')) {
+      const node = span.firstChild
+      if (span.children.length === 0 && node && node.nodeType === 3 && node.nodeValue === BRAND_FROM) {
+        node.nodeValue = BRAND_TO
+      }
+    }
+  }
+}
+
+function watchBrand(ctx) {
+  let queued = false
+  const observer = new MutationObserver(() => {
+    if (queued) return
+    queued = true
+    requestAnimationFrame(() => { queued = false; rebrand() })
+  })
+  observer.observe(document.body, { childList: true, subtree: true })
+  ctx.onDispose(() => observer.disconnect())
+  rebrand()
+}
+
 export default {
   id: 'langflow',
   name: 'Langflow',
-  description: 'Perdix의 Langflow 편집 화면을 왼쪽 사이드바 항목과 앱 안의 페이지로 엽니다.',
+  description: 'Perdix 연결용: Langflow 편집 화면을 사이드바 항목으로 열고, 첫 화면 이름을 Perdix로 바꿉니다.',
   register(ctx) {
     rest = ctx.rest
+    watchBrand(ctx)
     void refresh()
     ctx.register({ id: 'page', area: 'routes', title: 'Langflow', data: { path: PATH }, render: () => jsx(Page, {}) })
     ctx.register({ id: 'nav', area: 'sidebar.nav', data: { codicon: 'type-hierarchy', label: 'Langflow', path: PATH } })

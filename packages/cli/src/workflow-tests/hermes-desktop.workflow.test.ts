@@ -53,6 +53,8 @@ describe("Hermes Desktop 호환 서버", () => {
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'sidebar.nav'");
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'routes'");
       expect(LANGFLOW_PLUGIN_SOURCE).not.toMatch(/openWorkspace|statusBar/);
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("BRAND_TO = 'PERDIX'");
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("watchBrand(ctx)");
 
       const route = `${server.url}/api/plugins/langflow/config`;
       expect((await fetch(route)).status).toBe(401);
