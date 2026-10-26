@@ -42,6 +42,10 @@ cd server && uv run perdix-server --langflow-config /절대/경로/langflow.json
 서버가 실행하며 허용 목록·버전 확인·오류 정규화는 도구와 같다. 결과는 대화에 보이지만 모델의
 맥락에는 들어가지 않는다. Hermes Desktop 연동은 [hermes-desktop.md](hermes-desktop.md).
 
+## 편집 화면
+
+Hermes Desktop 안에서 Langflow 편집 화면(캔버스)을 여는 방법은 [hermes-desktop.md](hermes-desktop.md)를 본다.
+
 ## 시험용 Langflow
 
 ```bash

@@ -1,9 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { HermesAdapter } from "../hermes/adapter.js";
+import { LANGFLOW_PLUGIN_SOURCE } from "../hermes/langflow-plugin.js";
 import { startHermesDesktopServer, type HermesDesktopServer } from "../hermes/desktop-server.js";
 
 type Call = { method: string; params: Record<string, unknown> };
@@ -33,6 +35,50 @@ afterEach(async () => { await server?.close(); server = undefined; });
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
 describe("Hermes Desktop 호환 서버", () => {
+  it("Langflow 화면 플러그인: 설정이 있으면 설치하고, 주소와 실제 가동 여부를 알려 준다", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "perdix-plugin-"));
+    const langflow = createServer((req, res) => { res.writeHead(req.url === "/health" ? 200 : 404); res.end("{}"); });
+    await new Promise<void>((resolve) => langflow.listen(0, "127.0.0.1", resolve));
+    const port = (langflow.address() as { port: number }).port;
+    try {
+      const config = join(directory, "langflow.json");
+      const flows = { echo: "28549500-69e9-465f-aa8a-4486102151e4" };
+      writeFileSync(config, JSON.stringify({ enabled: true, base_url: `http://127.0.0.1:${port}/`, flows }));
+      const home = join(directory, "home");
+      server = await startHermesDesktopServer(fakeAdapter([]), { token: "t".repeat(32), langflowConfig: config, hermesHome: home });
+
+      const installed = join(home, "desktop-plugins", "langflow", "plugin.js");
+      expect(readFileSync(installed, "utf8")).toBe(LANGFLOW_PLUGIN_SOURCE);
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("perdix.langflow.open");
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("host.openWorkspace");
+
+      const route = `${server.url}/api/plugins/langflow/config`;
+      expect((await fetch(route)).status).toBe(401);
+      const up = await (await fetch(route, { headers: auth(server.token) })).json();
+      expect(up).toEqual({ url: `http://127.0.0.1:${port}`, ready: true });
+
+      await new Promise<void>((resolve) => langflow.close(() => resolve()));
+      const down = await (await fetch(route, { headers: auth(server.token) })).json();
+      expect(down).toEqual({ url: `http://127.0.0.1:${port}`, ready: false });
+    } finally {
+      langflow.closeAllConnections();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("Langflow 설정이 없거나 꺼져 있으면 플러그인을 설치하지 않고 url을 비운다", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "perdix-plugin-off-"));
+    try {
+      const home = join(directory, "home");
+      server = await startHermesDesktopServer(fakeAdapter([]), { token: "t".repeat(32), hermesHome: home });
+      expect(existsSync(join(home, "desktop-plugins"))).toBe(false);
+      const body = await (await fetch(`${server.url}/api/plugins/langflow/config`, { headers: auth(server.token) })).json();
+      expect(body).toEqual({ url: null, ready: false });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("Langflow 설정이 있으면 플로우를 스킬 목록에 보여주고, 꺼져 있거나 없으면 비운다", async () => {
     const directory = mkdtempSync(join(tmpdir(), "perdix-flows-"));
     try {

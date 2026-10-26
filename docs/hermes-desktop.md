@@ -40,6 +40,18 @@ cd apps/desktop && ./node_modules/.bin/electron --user-data-dir="$HOME/.perdix/h
 
 호출 가능한 플로우는 설정의 허용 목록뿐이다.
 
+## Langflow 편집 화면 열기
+
+서버를 `--langflow-config <파일> --hermes-home <HERMES_HOME>`로 켜면 Hermes 플러그인
+(`<HERMES_HOME>/desktop-plugins/langflow/plugin.js`)이 설치된다. Hermes 앱을 (재)시작하면:
+
+- 상태 표시줄 왼쪽의 `⧉ Langflow` 버튼을 누르거나, 대화창에 `/langflow`를 입력(슬래시 자동완성 때문에
+  Enter를 두 번)하면 메인 영역에 `LANGFLOW` 탭으로 Langflow 편집 화면이 열린다.
+- 탭 안에서 플로우 만들기·편집·Playground 실행을 그대로 쓸 수 있다. 로그인 상태는 앱 안에 유지된다.
+
+Langflow는 UI를 포함해 띄워야 한다(`langflow run`, `--backend-only` 제외). 개인용이면
+`LANGFLOW_AUTO_LOGIN=true`가 편하다. 플러그인은 Hermes 앱을 수정하지 않는 공식 확장 방식이다.
+
 ## 현재 지원
 
 채팅(스트리밍), 도구 실행 표시, 세션 목록, 모델 선택. 스킬·크론·음성·봇은 비어 있다.

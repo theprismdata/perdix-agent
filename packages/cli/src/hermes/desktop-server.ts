@@ -5,6 +5,8 @@
  * Hermes 앱은 수정하지 않는다(ADR 0036).
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
@@ -12,7 +14,8 @@ import type { HermesAdapter } from "./adapter.js";
 import { HermesSocketHub } from "./bridge.js";
 import { PERDIX_HERO, PERDIX_LOGO } from "./branding.js";
 import { VERSION } from "../version.js";
-import { readFlowCatalog, type FlowEntry } from "./flows.js";
+import { readFlowCatalog, readLangflowInfo, type FlowEntry } from "./flows.js";
+import { LANGFLOW_PLUGIN_ID, LANGFLOW_PLUGIN_SOURCE } from "./langflow-plugin.js";
 
 export interface HermesDesktopServer {
   readonly url: string;
@@ -25,6 +28,8 @@ export interface HermesDesktopServerOptions {
   readonly cwd?: string;
   /** `--langflow-config` 경로. 있으면 플로우를 Skills 화면에 보여준다. */
   readonly langflowConfig?: string;
+  /** 지정하면 `<경로>/desktop-plugins/langflow/plugin.js`에 Langflow 플러그인을 설치한다(HERMES_HOME). */
+  readonly hermesHome?: string;
   readonly token?: string;
   readonly log?: (line: string) => void;
 }
@@ -73,6 +78,7 @@ function status(): Json {
 
 interface RouteContext {
   readonly flows: () => FlowEntry[];
+  readonly langflowUi: () => Promise<Json>;
   readonly adapter: HermesAdapter;
   readonly url: URL;
   readonly cwd: string;
@@ -137,6 +143,8 @@ const ROUTES: Record<string, Route> = {
   "GET /api/tools/toolsets": () => [],
   "GET /api/tools/terminal/backends": () => ({ active: "local", backends: [] }),
   // Langflow 플로우를 Hermes의 스킬 목록에 보여준다. 실행은 `/flow <별칭> <입력>`이다.
+  // 플러그인(Langflow 화면 탭)이 주소를 묻는 곳. 실제로 떠 있는지도 알려 준다.
+  "GET /api/plugins/langflow/config": (ctx) => ctx.langflowUi(),
   "GET /api/skills": (ctx) => ctx.flows().map((flow) => ({
     name: flow.alias, category: "Langflow", enabled: true, provenance: "external",
     description: `${flow.description || "Langflow 플로우"} — /flow ${flow.alias} <입력>`,
@@ -164,6 +172,19 @@ export async function startHermesDesktopServer(
   const log = options.log ?? (() => {});
   const cwd = options.cwd ?? process.cwd();
   const flows = (): FlowEntry[] => readFlowCatalog(options.langflowConfig, log);
+  const langflowUi = async (): Promise<Json> => {
+    const info = readLangflowInfo(options.langflowConfig, log);
+    if (info === undefined) return { url: null, ready: false };
+    const ready = await fetch(`${info.baseUrl}/health`, { signal: AbortSignal.timeout(1500) })
+      .then((response) => response.ok, () => false);
+    return { url: info.baseUrl, ready };
+  };
+  if (options.hermesHome !== undefined && readLangflowInfo(options.langflowConfig, log) !== undefined) {
+    const directory = join(options.hermesHome, "desktop-plugins", LANGFLOW_PLUGIN_ID);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "plugin.js"), LANGFLOW_PLUGIN_SOURCE);
+    log(`Langflow 플러그인을 설치했습니다: ${directory}`);
+  }
   const hub = new HermesSocketHub(adapter, () => ({
     change_events: true, heartbeat: true, replay_epoch: 1,
     skin: { branding: { agent_name: "Perdix", prompt_symbol: "❯", welcome: "Perdix",
@@ -188,7 +209,7 @@ export async function startHermesDesktopServer(
       sendJson(res, 404, { detail: "Not Found" });
       return;
     }
-    Promise.resolve(route({ adapter, url, cwd, flows })).then(
+    Promise.resolve(route({ adapter, url, cwd, flows, langflowUi })).then(
       (body) => { log(`200 ${key}`); sendJson(res, 200, body); },
       (error: unknown) => {
         log(`500 ${key} ${error instanceof Error ? error.message : String(error)}`);

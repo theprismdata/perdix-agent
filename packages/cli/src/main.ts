@@ -32,6 +32,7 @@ Options:
       --tui <name>          default | hermes (Hermes TUI 평가판)
       --hermes-desktop      Hermes Desktop 앱이 접속할 호환 서버를 실행(주소·토큰 출력)
       --langflow-config <f> Langflow 연동 설정 JSON(선택, docs/langflow.md)
+      --hermes-home <dir>   --hermes-desktop일 때 이 HERMES_HOME에 Langflow 화면 플러그인을 설치
       --list                 List saved sessions for the working directory
       --permission-mode <m>  interactive | deny | accept-edits | allowlist | yolo (default with -p: deny)
       --server <cmd>         Server command (overrides PERDIX_SERVER)
@@ -63,6 +64,7 @@ function parseCli(argv: string[]) {
       "ollama-base-url": { type: "string" },
       "agents-config": { type: "string" },
       "langflow-config": { type: "string" },
+      "hermes-home": { type: "string" },
       team: { type: "string" },
       member: { type: "string" },
       "team-role": { type: "string" },
@@ -249,6 +251,7 @@ async function main(): Promise<number> {
       const adapter = new HermesAdapter(connection, { cwd, mode: args.mode, model });
       const desktop = await startHermesDesktopServer(adapter, {
         port: Number(process.env.PERDIX_HERMES_DESKTOP_PORT) || undefined, cwd, langflowConfig,
+        hermesHome: args["hermes-home"] ? resolve(args["hermes-home"]) : undefined,
         token: process.env.PERDIX_HERMES_DESKTOP_TOKEN || undefined,
         log: (line) => { if (args.debug) process.stderr.write(`[hermes-desktop] ${line}\n`); },
       });
