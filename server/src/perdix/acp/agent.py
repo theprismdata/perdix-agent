@@ -96,6 +96,7 @@ from perdix.harness.modes import MODES, Mode
 from perdix.harness.runner import SessionRunner, TurnBusyError
 from perdix.harness.turn import TurnResult, TurnRunner, tool_title
 from perdix.harness.verifier import LoopCallbacks
+from perdix.integrations.langflow.client import LangflowClient
 from perdix.llm import catalog
 from perdix.llm.anthropic import AnthropicProvider
 from perdix.llm.base import Provider, ProviderError
@@ -110,7 +111,8 @@ from perdix.session.recovery import repair_unpaired_tool_uses
 from perdix.session.store import Event, EventStore, ModeChangePayload, SessionRecord
 from perdix.teams.models import TeamCommand, TeamError
 from perdix.teams.store import TeamStore
-from perdix.tools.base import ToolKind, ToolOutput
+from perdix.tools.base import Tool, ToolKind, ToolOutput
+from perdix.tools.langflow import LangflowRunTool
 from perdix.tools.mode import SwitchModeTool
 from perdix.tools.registry import ToolRegistry, builtin_tools
 from perdix.tools.team import TeamTool
@@ -237,7 +239,8 @@ class PerdixAgent:
         self._sessions: dict[str, _SessionState] = {}
         self._teams: dict[str, TeamStore] = {}
         self._runner = SessionRunner(self._make_turn_runner)
-        self._registry = ToolRegistry(builtin_tools())
+        self._langflow = LangflowClient(config.langflow) if config.langflow.enabled else None
+        self._registry = ToolRegistry(self._builtin_tools())
         self._sandbox = LocalBackend()
         self._providers: dict[str, Provider] = {}
         self._credentials = load_credentials(config.credentials_path)
@@ -313,6 +316,12 @@ class PerdixAgent:
         except KeyError:
             return self.config.provider
 
+    def _builtin_tools(self) -> list[Tool]:
+        tools = builtin_tools()
+        if self._langflow is not None:
+            tools.append(LangflowRunTool(self.config.langflow))
+        return tools
+
     def _provider_for(self, model: str) -> Provider:
         if self._fake is not None:
             return self._fake
@@ -366,7 +375,7 @@ class PerdixAgent:
         runner = TurnRunner(
             store=self._store,
             provider=self._provider_for(state.model),
-            registry=ToolRegistry([*builtin_tools(), *team_tools]),
+            registry=ToolRegistry([*self._builtin_tools(), *team_tools]),
             policy=state.policy,
             sandbox=self._sandbox,
             budget=Budget(),
@@ -384,6 +393,7 @@ class PerdixAgent:
             provider_factory=self._provider_for,
             agents_config=self._agents_config,
             memory_root=self.config.memories.root,
+            langflow=self._langflow,
             before_model=(lambda: self._receive_team(session_id)) if team else None,
         )
         tools = [runner.registry.get(name) for name in runner.registry.names()]
@@ -922,7 +932,7 @@ class PerdixAgent:
                 session_id, "user_message", {"content": [b.model_dump() for b in blocks]}
             )
             turn.registry = ToolRegistry([
-                *builtin_tools(), *([TeamTool(team)] if team is not None else []),
+                *self._builtin_tools(), *([TeamTool(team)] if team is not None else []),
             ])
             return await GoalRunner(
                 turn, LoopCallbacks(session_id, cancel, sink, ask_permission)

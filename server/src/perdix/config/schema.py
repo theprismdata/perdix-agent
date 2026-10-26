@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from perdix.config.credentials import DEFAULT_CREDENTIALS_PATH
+from perdix.integrations.langflow.config import LangflowConfig
 from perdix.memory.schema import MemoryConfig
 from perdix.permissions.policy import PermissionMode
 from perdix.session.store import DEFAULT_DB_PATH
@@ -37,6 +38,7 @@ class ServerConfig(BaseModel):
     team_db: Path = Path.home() / ".perdix" / "teams.sqlite3"
     team_project: Path | None = None
     memories: MemoryConfig = Field(default_factory=MemoryConfig)
+    langflow: LangflowConfig = Field(default_factory=LangflowConfig)
     trust_project: bool = False
     db_path: str = str(DEFAULT_DB_PATH)
     provider: ProviderName = "anthropic"

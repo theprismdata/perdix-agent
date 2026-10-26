@@ -37,6 +37,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--team-project")
     parser.add_argument("--openai-auth", choices=["login", "status", "logout"])
     parser.add_argument("--effort")
+    parser.add_argument("--langflow-config", help="Langflow 연동 설정 JSON 파일(선택 기능)")
     parser.add_argument("--memory-config", help="자동 메모리 설정 JSON 파일")
     parser.add_argument(
         "--permission-mode",
@@ -105,7 +106,20 @@ def main() -> None:
     del args.openai_auth
     memory_path = args.memory_config
     del args.memory_config
+    langflow_path = args.langflow_config
+    del args.langflow_config
     values: dict[str, Any] = {k: v for k, v in vars(args).items() if v is not None}
+    if langflow_path is not None:
+        from pathlib import Path
+
+        from perdix.integrations.langflow.config import LangflowConfig
+
+        try:
+            values["langflow"] = LangflowConfig.model_validate_json(
+                Path(langflow_path).read_text(encoding="utf-8")
+            )
+        except (OSError, ValidationError) as exc:
+            parser.error(f"Langflow 설정 파일을 읽지 못했습니다: {exc}")
     if memory_path is not None:
         from pathlib import Path
 

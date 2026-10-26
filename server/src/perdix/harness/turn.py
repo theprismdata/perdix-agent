@@ -54,6 +54,7 @@ from perdix.tools.base import Tool, ToolContext, ToolKind, ToolOutput, tool_erro
 from perdix.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
+    from perdix.integrations.langflow.client import LangflowClient
     from perdix.subagents.spawn import SubagentOutcome
 
 DEFAULT_MAX_TOKENS: Final = 32_000
@@ -181,6 +182,7 @@ class TurnRunner:
         agents_config: AgentsConfig | None = None,
         on_step: Callable[[], Awaitable[None]] | None = None,
         memory_root: Path | None = None,
+        langflow: LangflowClient | None = None,
         compactor_factory: ProviderFactory | None = None,
         before_model: Callable[[], Awaitable[bool]] | None = None,
     ) -> None:
@@ -213,6 +215,7 @@ class TurnRunner:
         self.agents_config = agents_config
         self.on_step = on_step
         self.memory_root = memory_root
+        self.langflow = langflow
         self.before_model = before_model
         # 세션당 하나의 권한 큐(harness-loop.md §3.3 규칙 4). 훅 이후 재평가도 같은 큐를 쓴다.
         self._ask_lock = asyncio.Lock()
@@ -745,6 +748,7 @@ class TurnRunner:
             spawn_subagent=self._spawn_subagent if self.provider_factory is not None else None,
             session_store=self.store,
             memory_root=self.memory_root,
+            langflow=self.langflow,
         )
         output = await self._run_cancellable(tool, ctx, input, cancel)
         if output is None:

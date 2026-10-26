@@ -15,6 +15,7 @@ from perdix.context.messages import DiffDisplay, DisplayContent, TextDisplay
 from perdix.sandbox.base import ExecBackend
 
 if TYPE_CHECKING:
+    from perdix.integrations.langflow.client import LangflowClient
     from perdix.session.store import EventStore
     from perdix.subagents.spawn import SubagentOutcome
 
@@ -61,6 +62,7 @@ class ToolContext:
     spawn_subagent: SpawnSubagent | None = None
     session_store: EventStore | None = None
     memory_root: Path | None = None
+    langflow: LangflowClient | None = None
 
 
 class Tool(Protocol):
