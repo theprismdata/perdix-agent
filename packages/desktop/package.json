@@ -1,0 +1,13 @@
+{
+  "name": "@perdix/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Perdix 게이트웨이 대시보드를 감싸는 Electron 네이티브 래퍼 (ADR 0035)",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^34.0.0"
+  }
+}
