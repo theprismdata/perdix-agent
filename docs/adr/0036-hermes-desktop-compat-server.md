@@ -71,6 +71,15 @@ ESM + `@hermes/plugin-sdk`)을 쓴다. 앱 소스는 수정하지 않는다.
 의존하므로 그 구조가 바뀌면 글자가 원래대로 보일 뿐 기능은 영향이 없다. 창 제목, 설정 문구 등 다른
 `Hermes` 표기는 아직 바꾸지 않았다.
 
+## Langflow 화면의 홍보 요소 숨기기 (추가 결정)
+
+Langflow 화면에는 상단의 GitHub 별·Discord 인원 표시, 왼쪽 `Get started` 안내(Star repo, Join the
+community), 프로필 메뉴의 커뮤니티 링크가 기본으로 있어 앱 안에서 이질적이다. 플러그인이 `<webview>`의
+`dom-ready`마다 숨김 스크립트를 주입한다(`MutationObserver`). 상단 아이콘은 아이콘 모양(GitHub 496x512,
+Discord 640x512)으로 상단 바 안의 버튼만, 나머지는 `data-testid`로 찾는다. Langflow 소스는 고치지 않는다.
+숨기기만 하며 Langflow가 별·인원을 가져오는 외부 요청(api.github.com, discord.com)은 막지 않는다.
+Langflow 화면 구조가 바뀌면 숨김이 풀릴 뿐 기능에는 영향이 없다.
+
 ## 검증 (2026-10-26)
 
 Hermes Desktop 소스 `63d0b94`를 별도 클론에서 빌드(`npm install`, `npm run build`)해

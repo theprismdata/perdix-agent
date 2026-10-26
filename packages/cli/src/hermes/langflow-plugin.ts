@@ -45,6 +45,38 @@ function Notice({ text, retry }) {
   })
 }
 
+// Langflow 화면 안의 GitHub·Discord 별/인원 표시, 시작 안내 패널, 프로필 메뉴의 커뮤니티 링크는
+// 이 앱과 어울리지 않아 숨긴다. 화면에 주입되는 스크립트라 이 함수는 외부 값을 쓰지 않는다.
+// (숨길 뿐이며 Langflow가 보내는 별/인원 조회 요청 자체는 막지 않는다.)
+function hideLangflowChrome() {
+  const hide = (element) => {
+    if (element && element.style.display !== 'none') element.style.setProperty('display', 'none', 'important')
+  }
+  const run = () => {
+    // 상단 바의 GitHub(496x512)·Discord(640x512) 아이콘 버튼. 상단 바 밖의 버튼은 건드리지 않는다.
+    for (const icon of document.querySelectorAll('svg[viewBox="0 0 496 512"], svg[viewBox="0 0 640 512"]')) {
+      const button = icon.closest('button')
+      if (button && button.getBoundingClientRect().top < 100) hide(button)
+    }
+    const title = document.querySelector('[data-testid="get_started_progress_title"]')
+    if (title) hide(title.closest('[class*="10.8rem"]'))
+    for (const id of ['menu_github_button', 'menu_discord_button', 'menu_twitter_button']) {
+      hide(document.querySelector('[data-testid="' + id + '"]'))
+    }
+  }
+  new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true })
+  run()
+}
+
+function attachChromeHider(webview) {
+  if (!webview || webview.__perdixHider) return
+  webview.__perdixHider = true
+  // 페이지를 새로 불러올 때마다 다시 주입한다(화면 안 이동은 같은 문서라 한 번이면 된다).
+  webview.addEventListener('dom-ready', () => {
+    Promise.resolve(webview.executeJavaScript('(' + hideLangflowChrome.toString() + ')()')).catch(() => {})
+  })
+}
+
 function Page() {
   const current = useValue(state)
   if (current.status === 'loading') return jsx(Notice, { text: 'Langflow에 연결하는 중…' })
@@ -59,6 +91,7 @@ function Page() {
   }
   // webview는 앱과 분리된 최상위 창처럼 동작해 Langflow의 로그인 쿠키가 막히지 않는다.
   return jsx('webview', {
+    ref: attachChromeHider,
     partition: 'persist:perdix-langflow',
     src: current.url,
     allowpopups: 'true',
