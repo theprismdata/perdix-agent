@@ -49,15 +49,16 @@ ESM + `@hermes/plugin-sdk`)을 쓴다. 앱 소스는 수정하지 않는다.
 - `perdix --hermes-desktop --langflow-config <파일> --hermes-home <HERMES_HOME>`로 서버를 켜면
   `desktop-plugins/langflow/plugin.js`를 설치한다(`hermes/langflow-plugin.ts`의 소스). 설정이 없거나
   꺼져 있으면 설치하지 않는다. 기존 `~/.hermes`는 명시적으로 지정하지 않는 한 건드리지 않는다.
-- 플러그인은 상태 표시줄 왼쪽에 `⧉ Langflow` 버튼을 달고, 누르면 `host.openWorkspace`로 메인 영역에
-  `LANGFLOW` 탭을 연다. 탭 안은 `<webview partition="persist:perdix-langflow">`다. iframe이 아니라
-  webview를 쓰는 이유는 앱(file://)과 Langflow가 다른 사이트라 iframe에서는 로그인 쿠키가 막힐 수
-  있기 때문이다(Hermes의 웹 미리보기 창도 webview를 쓴다).
+- 플러그인은 `routes` 영역에 `/langflow` 페이지를, `sidebar.nav` 영역에 왼쪽 사이드바의 `Langflow`
+  항목(Scheduled jobs 아래)을 등록한다. 항목을 누르면 메인 영역에 Langflow 편집 화면이 열린다. 페이지 안은
+  `<webview partition="persist:perdix-langflow">`다. iframe이 아니라 webview를 쓰는 이유는 앱(file://)과
+  Langflow가 다른 사이트라 iframe에서는 로그인 쿠키가 막힐 수 있기 때문이다(Hermes의 웹 미리보기 창도
+  webview를 쓴다). 처음에는 상태 표시줄 버튼+`openWorkspace` 탭으로 만들었다가 사이드바 요청에 따라 바꿨다.
 - 주소는 파일에 박지 않고 플러그인이 `ctx.rest('/config')`(`GET /api/plugins/langflow/config`)로
   호환 서버에 묻는다. 서버는 `--langflow-config`의 `base_url`과 `/health` 응답 여부를 돌려주고,
-  꺼져 있으면 탭에 안내 문구를 보여 준다.
+  꺼져 있으면 페이지에 안내 문구와 `다시 확인` 버튼을 보여 준다.
 - 대화창의 `/langflow`는 어댑터가 `perdix.langflow.open` 이벤트를 보내고, 플러그인이 `ctx.onEvent`로
-  받아 같은 탭을 연다(이미 열려 있으면 앞으로 가져온다).
+  받아 `host.navigate('/langflow')`로 같은 페이지를 연다.
 - Langflow는 UI를 포함해 실행해야 하고(`--backend-only` 아님), 개인용으로 `LANGFLOW_AUTO_LOGIN=true`를
   권장한다. 이때도 `LANGFLOW_API_KEY` 환경변수 인증은 그대로 동작한다.
 
@@ -72,7 +73,7 @@ Hermes Desktop 소스 `63d0b94`를 별도 클론에서 빌드(`npm install`, `np
 - 앱이 보내는 RPC 중 `profiles.list`, `pet.info`, `projects.tree`, `complete.path` 등은 어댑터가
   지원하지 않아 오류로 응답한다(화면은 동작).
 - 도구 호출 전에 나온 텍스트가 최종 응답에 한 번 더 붙는 현상이 있다(어댑터의 텍스트 누적).
-- 플러그인은 Hermes의 플러그인 SDK(`host.openWorkspace`, `ctx.rest`, `ctx.onEvent`)에 의존한다.
+- 플러그인은 Hermes의 플러그인 SDK(`routes`·`sidebar.nav` 영역, `host.navigate`, `ctx.rest`, `ctx.onEvent`)에 의존한다.
   SDK가 바뀌면 깨질 수 있어 `63d0b94` 기준으로 확인했다.
 - Skills 화면의 켜기/끄기·Edit·Archive는 서버가 지원하지 않아 동작하지 않는다.
 - 도구 카드가 `Result unavailable`로 표시된다(어댑터가 `tool.complete`에 결과를 싣지 않음).

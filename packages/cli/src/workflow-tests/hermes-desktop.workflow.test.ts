@@ -50,7 +50,9 @@ describe("Hermes Desktop 호환 서버", () => {
       const installed = join(home, "desktop-plugins", "langflow", "plugin.js");
       expect(readFileSync(installed, "utf8")).toBe(LANGFLOW_PLUGIN_SOURCE);
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("perdix.langflow.open");
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("host.openWorkspace");
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'sidebar.nav'");
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'routes'");
+      expect(LANGFLOW_PLUGIN_SOURCE).not.toMatch(/openWorkspace|statusBar/);
 
       const route = `${server.url}/api/plugins/langflow/config`;
       expect((await fetch(route)).status).toBe(401);

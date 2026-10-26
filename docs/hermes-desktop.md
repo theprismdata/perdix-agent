@@ -45,9 +45,10 @@ cd apps/desktop && ./node_modules/.bin/electron --user-data-dir="$HOME/.perdix/h
 서버를 `--langflow-config <파일> --hermes-home <HERMES_HOME>`로 켜면 Hermes 플러그인
 (`<HERMES_HOME>/desktop-plugins/langflow/plugin.js`)이 설치된다. Hermes 앱을 (재)시작하면:
 
-- 상태 표시줄 왼쪽의 `⧉ Langflow` 버튼을 누르거나, 대화창에 `/langflow`를 입력(슬래시 자동완성 때문에
-  Enter를 두 번)하면 메인 영역에 `LANGFLOW` 탭으로 Langflow 편집 화면이 열린다.
-- 탭 안에서 플로우 만들기·편집·Playground 실행을 그대로 쓸 수 있다. 로그인 상태는 앱 안에 유지된다.
+- 왼쪽 사이드바의 `Langflow` 항목(Scheduled jobs 아래)을 누르거나, 대화창에 `/langflow`를 입력(슬래시
+  자동완성 때문에 Enter를 두 번)하면 메인 영역에 Langflow 편집 화면이 열린다.
+- 화면 안에서 플로우 만들기·편집·Playground 실행을 그대로 쓸 수 있다. 로그인 상태는 앱 안에 유지된다.
+- Langflow가 꺼져 있으면 안내 문구와 `다시 확인` 버튼이 보인다.
 
 Langflow는 UI를 포함해 띄워야 한다(`langflow run`, `--backend-only` 제외). 개인용이면
 `LANGFLOW_AUTO_LOGIN=true`가 편하다. 플러그인은 Hermes 앱을 수정하지 않는 공식 확장 방식이다.
