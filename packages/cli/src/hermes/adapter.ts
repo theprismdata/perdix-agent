@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { LoadSessionOptions, NewSessionOptions } from "../agent/connection.js";
 import type { AgentEvent, PermissionAnswer, PermissionRequest, SessionHandle, SessionListItem } from "../agent/types.js";
 import { VERSION } from "../version.js";
 import type { AuthAction, AuthProvider, HermesAuthResult } from "./auth.js";
+import { absentFeature, mcpServersList, mcpServersStatus, profilesList, projectsTree, runtimeCheck } from "./features.js";
 import { approvalOptions, toolResultText, type HermesEvent, type HermesMessage } from "./events.js";
 import { droppedImagePath, MAX_IMAGES, readClipboardImage, readImage, type AttachedImage } from "./images.js";
 
@@ -518,7 +521,32 @@ export class HermesAdapter {
         }
         throw new HermesRpcError(-32601, "이 Hermes 기능은 Perdix 평가판에 연결되지 않았습니다. /help로 지원 기능을 확인하세요.");
       }
-      default: throw new HermesRpcError(-32601, `평가판에서 지원하지 않는 UI 요청입니다: ${method}`);
+      case "mcp.servers.list": return mcpServersList();
+      case "mcp.servers.status": return mcpServersStatus();
+      case "projects.tree": {
+        const sessions = await this.connection.listSessions();
+        const active = this.current ? this.sessions.get(this.current)?.handle.info.cwd : undefined;
+        return projectsTree(sessions, active);
+      }
+      case "setup.runtime_check": return runtimeCheck(await this.runtimeInfo());
+      case "profiles.list": return profilesList(await this.runtimeInfo(), join(homedir(), ".perdix"));
+      default: {
+        const answer = absentFeature(method);
+        if (answer !== undefined) return answer;
+        throw new HermesRpcError(-32601, `Perdix가 지원하지 않는 요청입니다: ${method}`);
+      }
+    }
+  }
+
+  /** 현재 모델·공급자. 열린 세션이 없으면 하나 만들어 읽는다(앱도 곧 세션을 만든다). */
+  private async runtimeInfo(): Promise<{ model: string | null; provider: string | null } | null> {
+    try {
+      const id = this.current ?? String(((await this.request("session.create", { cols: 80 })) as { session_id?: string }).session_id);
+      const info = this.session(id).handle.info;
+      const model = info.currentModel ?? null;
+      return { model, provider: info.models.find((item) => item.value === model)?.provider ?? null };
+    } catch {
+      return null;
     }
   }
 
