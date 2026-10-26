@@ -12,6 +12,7 @@ import type { HermesAdapter } from "./adapter.js";
 import { HermesSocketHub } from "./bridge.js";
 import { PERDIX_HERO, PERDIX_LOGO } from "./branding.js";
 import { VERSION } from "../version.js";
+import { readFlowCatalog, type FlowEntry } from "./flows.js";
 
 export interface HermesDesktopServer {
   readonly url: string;
@@ -22,6 +23,8 @@ export interface HermesDesktopServer {
 export interface HermesDesktopServerOptions {
   readonly port?: number;
   readonly cwd?: string;
+  /** `--langflow-config` 경로. 있으면 플로우를 Skills 화면에 보여준다. */
+  readonly langflowConfig?: string;
   readonly token?: string;
   readonly log?: (line: string) => void;
 }
@@ -69,6 +72,7 @@ function status(): Json {
 }
 
 interface RouteContext {
+  readonly flows: () => FlowEntry[];
   readonly adapter: HermesAdapter;
   readonly url: URL;
   readonly cwd: string;
@@ -132,7 +136,11 @@ const ROUTES: Record<string, Route> = {
   "GET /api/fs/default-cwd": (ctx) => ({ cwd: ctx.cwd, branch: "" }),
   "GET /api/tools/toolsets": () => [],
   "GET /api/tools/terminal/backends": () => ({ active: "local", backends: [] }),
-  "GET /api/skills": () => [],
+  // Langflow 플로우를 Hermes의 스킬 목록에 보여준다. 실행은 `/flow <별칭> <입력>`이다.
+  "GET /api/skills": (ctx) => ctx.flows().map((flow) => ({
+    name: flow.alias, category: "Langflow", enabled: true, provenance: "external",
+    description: `${flow.description || "Langflow 플로우"} — /flow ${flow.alias} <입력>`,
+  })),
   "GET /api/cron/jobs": () => [],
   "GET /api/cron/delivery-targets": () => ({ targets: [] }),
   "GET /api/messaging/platforms": () => ({ platforms: [] }),
@@ -155,6 +163,7 @@ export async function startHermesDesktopServer(
   const token = options.token ?? randomBytes(32).toString("hex");
   const log = options.log ?? (() => {});
   const cwd = options.cwd ?? process.cwd();
+  const flows = (): FlowEntry[] => readFlowCatalog(options.langflowConfig, log);
   const hub = new HermesSocketHub(adapter, () => ({
     change_events: true, heartbeat: true, replay_epoch: 1,
     skin: { branding: { agent_name: "Perdix", prompt_symbol: "❯", welcome: "Perdix",
@@ -179,7 +188,7 @@ export async function startHermesDesktopServer(
       sendJson(res, 404, { detail: "Not Found" });
       return;
     }
-    Promise.resolve(route({ adapter, url, cwd })).then(
+    Promise.resolve(route({ adapter, url, cwd, flows })).then(
       (body) => { log(`200 ${key}`); sendJson(res, 200, body); },
       (error: unknown) => {
         log(`500 ${key} ${error instanceof Error ? error.message : String(error)}`);

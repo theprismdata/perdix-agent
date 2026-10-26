@@ -31,6 +31,7 @@ Options:
       --resume <sessionId>   Resume a saved session
       --tui <name>          default | hermes (Hermes TUI 평가판)
       --hermes-desktop      Hermes Desktop 앱이 접속할 호환 서버를 실행(주소·토큰 출력)
+      --langflow-config <f> Langflow 연동 설정 JSON(선택, docs/langflow.md)
       --list                 List saved sessions for the working directory
       --permission-mode <m>  interactive | deny | accept-edits | allowlist | yolo (default with -p: deny)
       --server <cmd>         Server command (overrides PERDIX_SERVER)
@@ -61,6 +62,7 @@ function parseCli(argv: string[]) {
       model: { type: "string" },
       "ollama-base-url": { type: "string" },
       "agents-config": { type: "string" },
+      "langflow-config": { type: "string" },
       team: { type: "string" },
       member: { type: "string" },
       "team-role": { type: "string" },
@@ -187,6 +189,8 @@ async function main(): Promise<number> {
   const permissionMode = args["permission-mode"];
   const serverArgs = args["agents-config"] ? ["--agents-config", resolve(args["agents-config"])] : [];
   if (args.provider) serverArgs.push("--provider", args.provider);
+  const langflowConfig = args["langflow-config"] ? resolve(args["langflow-config"]) : undefined;
+  if (langflowConfig) serverArgs.push("--langflow-config", langflowConfig);
   if (args["ollama-base-url"]) {
     serverArgs.push("--ollama-base-url", args["ollama-base-url"]);
   }
@@ -244,7 +248,7 @@ async function main(): Promise<number> {
       ]);
       const adapter = new HermesAdapter(connection, { cwd, mode: args.mode, model });
       const desktop = await startHermesDesktopServer(adapter, {
-        port: Number(process.env.PERDIX_HERMES_DESKTOP_PORT) || undefined, cwd,
+        port: Number(process.env.PERDIX_HERMES_DESKTOP_PORT) || undefined, cwd, langflowConfig,
         token: process.env.PERDIX_HERMES_DESKTOP_TOKEN || undefined,
         log: (line) => { if (args.debug) process.stderr.write(`[hermes-desktop] ${line}\n`); },
       });

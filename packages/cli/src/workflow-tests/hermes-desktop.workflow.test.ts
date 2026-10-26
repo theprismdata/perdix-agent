@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { HermesAdapter } from "../hermes/adapter.js";
@@ -30,6 +33,27 @@ afterEach(async () => { await server?.close(); server = undefined; });
 const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 
 describe("Hermes Desktop 호환 서버", () => {
+  it("Langflow 설정이 있으면 플로우를 스킬 목록에 보여주고, 꺼져 있거나 없으면 비운다", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "perdix-flows-"));
+    try {
+      const path = join(directory, "langflow.json");
+      const flows = { echo: "28549500-69e9-465f-aa8a-4486102151e4" };
+      writeFileSync(path, JSON.stringify({ enabled: true, flows, flow_descriptions: { echo: "에코" } }));
+      server = await startHermesDesktopServer(fakeAdapter([]), { token: "t".repeat(32), langflowConfig: path });
+      const skills = await (await fetch(`${server.url}/api/skills`, { headers: auth(server.token) })).json() as Array<Record<string, unknown>>;
+      expect(skills).toHaveLength(1);
+      expect(skills[0]).toMatchObject({ name: "echo", category: "Langflow", enabled: true });
+      expect(String(skills[0]?.description)).toContain("/flow echo <입력>");
+
+      writeFileSync(path, JSON.stringify({ enabled: false, flows }));
+      expect(await (await fetch(`${server.url}/api/skills`, { headers: auth(server.token) })).json()).toEqual([]);
+      writeFileSync(path, "{깨진 json");
+      expect(await (await fetch(`${server.url}/api/skills`, { headers: auth(server.token) })).json()).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("health와 status는 토큰 없이, 나머지는 토큰이 있어야 응답한다", async () => {
     server = await startHermesDesktopServer(fakeAdapter([]), { token: "t".repeat(32), cwd: "/work" });
     expect((await fetch(`${server.url}/api/health`)).status).toBe(200);

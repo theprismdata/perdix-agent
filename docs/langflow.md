@@ -36,6 +36,12 @@ cd server && uv run perdix-server --langflow-config /절대/경로/langflow.json
 `execution`, `unsupported_version`, `wrong_instance`, `bad_response`이며 `unavailable`·
 `timeout`만 재시도할 만하다.
 
+## 사용자가 직접 실행
+
+`/flows`는 허용 목록을, `/flow <별칭> <입력>`은 해당 플로우를 직접 실행한다. 모델과 승인 없이
+서버가 실행하며 허용 목록·버전 확인·오류 정규화는 도구와 같다. 결과는 대화에 보이지만 모델의
+맥락에는 들어가지 않는다. Hermes Desktop 연동은 [hermes-desktop.md](hermes-desktop.md).
+
 ## 시험용 Langflow
 
 ```bash

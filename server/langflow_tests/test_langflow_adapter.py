@@ -237,3 +237,30 @@ async def test_tool_success_and_error_results(tmp_path: Path) -> None:
     assert out.is_error  # 스키마 밖 필드
     out = await tool.run(ctx(tmp_path, None), {"flow": "echo", "input": "hi"})
     assert out.is_error and "꺼져" in out.content
+
+
+# --- /flows, /flow 명령 -------------------------------------------------------------------------
+
+from perdix.acp.flow_commands import flow_list, run_flow_command  # noqa: E402
+
+
+@pytest.mark.asyncio
+async def test_flow_commands_list_run_and_report_errors() -> None:
+    cfg = config(flow_descriptions={"echo": "입력을 돌려줌"})
+    listing = flow_list(cfg)
+    assert "echo  입력을 돌려줌" in listing and "/flow <별칭> <입력>" in listing
+
+    client_ok = LangflowClient(cfg, transport=Fake().transport())
+    assert await run_flow_command("/flows", cfg, client_ok) == listing
+    assert await run_flow_command("/flow", cfg, client_ok) == listing  # 인자 없으면 목록
+    assert await run_flow_command("/flow echo", cfg, client_ok) == listing  # 입력 없으면 목록
+    assert await run_flow_command("/flow echo 안녕 하세요", cfg, client_ok, "s1") == "hello\n"
+
+    fake = Fake()
+    guarded = LangflowClient(cfg, transport=fake.transport())
+    out = await run_flow_command("/flow nope x", cfg, guarded)
+    assert "unknown_flow" in out and fake.calls == []  # 허용 목록 밖은 네트워크에 가지 않는다
+
+    down = LangflowClient(cfg, transport=Fake(run=httpx2.ConnectError("x")).transport())
+    assert "unavailable" in await run_flow_command("/flow echo a", cfg, down)
+    assert "꺼져" in await run_flow_command("/flow echo a", cfg, None)

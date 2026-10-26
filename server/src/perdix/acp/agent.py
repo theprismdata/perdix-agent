@@ -67,6 +67,7 @@ from acp.schema import (
 
 from perdix import __version__
 from perdix.acp.auth_profiles import AUTH_HELP, AUTH_PREFIX, SessionAuthProfiles
+from perdix.acp.flow_commands import FLOW_COMMANDS, run_flow_command
 from perdix.acp.mapping import to_session_update
 from perdix.acp.memories import MEMORY_OPTION_IDS, SessionMemories
 from perdix.config.agents import AGENT_ROLES, assign_openrouter, load_agents_config
@@ -1008,6 +1009,20 @@ class PerdixAgent:
                                 {"hint": "use on|off | generate on|off"}
                             ),
                         ),
+                        *(
+                            [
+                                AvailableCommand(
+                                    name="flows", description="사용할 수 있는 Langflow 플로우 목록",
+                                ),
+                                AvailableCommand(
+                                    name="flow", description="Langflow 플로우를 직접 실행합니다",
+                                    input=AvailableCommandInput.model_validate(
+                                        {"hint": "<별칭> <입력>"}
+                                    ),
+                                ),
+                            ]
+                            if self._langflow is not None else []
+                        ),
                     ],
                 ),
             )
@@ -1048,6 +1063,12 @@ class PerdixAgent:
                     await self.set_config_option(AUTH_PREFIX + words[2], session_id, words[3])
                     reply = self._auth.status(session_id)
                 await self._notify(session_id, TextDelta(text=reply + "\n"))
+                return PromptResponse(stop_reason="end_turn")
+            if words and words[0] in FLOW_COMMANDS:
+                reply = await run_flow_command(
+                    command_text, self.config.langflow, self._langflow, session_id,
+                )
+                await self._notify(session_id, TextDelta(text=reply))
                 return PromptResponse(stop_reason="end_turn")
             if command_text == "/team" or command_text.startswith("/team "):
                 if (self.config.team is None

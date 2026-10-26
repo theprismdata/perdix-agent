@@ -28,6 +28,19 @@ Electron 래퍼는 게이트웨이 작업 대시보드를 감쌀 뿐 대화형 �
 6. 실행은 `perdix --hermes-desktop`. 주소는 stdout에 출력하고 토큰은
    `PERDIX_HERMES_DESKTOP_SHOW_TOKEN=1`일 때만 출력한다.
 
+## Langflow 플로우 사용 (추가 결정)
+
+Hermes Desktop에서 Langflow를 쓰는 길은 세 가지이며 모두 Perdix 서버의 `langflow_run` 경로
+(허용 목록, 버전 확인, 오류 정규화)를 재사용한다. Hermes 앱과 Langflow는 수정하지 않는다.
+
+1. **모델이 호출**: 모델이 `langflow_run` 도구를 부른다. 실행형이라 build 모드에서만 보이고 Hermes
+   승인 카드(`Reject`/`Always allow`/`Run`)로 사용자 승인을 받는다.
+2. **직접 실행**: 대화창에 `/flows`(목록), `/flow <별칭> <입력>`을 입력한다. 사용자가 직접 입력한
+   명령이므로 모델·승인 없이 서버가 바로 실행하고(`acp/flow_commands.py`), 허용 목록은 그대로 적용한다.
+   결과는 대화에 표시되지만 모델의 맥락에는 들어가지 않는다.
+3. **목록 보기**: Capabilities → Skills 화면에 플로우가 `Langflow` 분류의 스킬로 나온다. 호환 서버가
+   서버와 같은 `--langflow-config` 파일에서 별칭·설명만 읽는다(읽기 전용, 실행·허용 판단은 서버).
+
 ## 검증 (2026-10-26)
 
 Hermes Desktop 소스 `63d0b94`를 별도 클론에서 빌드(`npm install`, `npm run build`)해
@@ -39,6 +52,8 @@ Hermes Desktop 소스 `63d0b94`를 별도 클론에서 빌드(`npm install`, `np
 - 앱이 보내는 RPC 중 `profiles.list`, `pet.info`, `projects.tree`, `complete.path` 등은 어댑터가
   지원하지 않아 오류로 응답한다(화면은 동작).
 - 도구 호출 전에 나온 텍스트가 최종 응답에 한 번 더 붙는 현상이 있다(어댑터의 텍스트 누적).
+- Skills 화면의 켜기/끄기·Edit·Archive는 서버가 지원하지 않아 동작하지 않는다.
+- 도구 카드가 `Result unavailable`로 표시된다(어댑터가 `tool.complete`에 결과를 싣지 않음).
 - 세션 목록은 이어 보기·삭제·이름 변경 REST를 아직 구현하지 않았다.
 - Hermes 쪽 버전이 바뀌면 필수 REST가 달라질 수 있다. 계약 테스트는 서버 쪽만 있다.
 - 상주 실행(launchd)과 앱 설치·업데이트 절차는 정하지 않았다.

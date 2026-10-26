@@ -22,7 +22,8 @@ const COMMANDS = [
   ["/cancel", "진행 중 작업 취소"],
   ["/image", "이미지 파일 첨부: /image <경로>"],
   ["/save", "자동 저장과 복원 안내"], ["/loop", "Perdix 목표 루프"],
-  ["/memories", "Perdix 메모리"], ["/theme", "auto | light | dark"],
+  ["/memories", "Perdix 메모리"], ["/flows", "Langflow 플로우 목록"],
+  ["/flow", "Langflow 플로우 실행: /flow <별칭> <입력>"], ["/theme", "auto | light | dark"],
   ["/redraw", "화면 다시 그리기"], ["/copy", "응답 복사"], ["/quit", "종료"],
   ["/login", "공급자 로그인·API 키 등록"], ["/logout", "공급자 로그아웃"], ["/auth", "status | list | use <제공자> <프로필|legacy>"],
 ] as const;
@@ -496,7 +497,8 @@ export class HermesAdapter {
           this.publish(id, "session.info", this.info(session));
           return { output: `모델 변경: ${session.handle.info.currentModel}` };
         }
-        if (name === "loop" || name === "memories" || name === "team" || name === "auth" || name === "permissions") {
+        if (name === "loop" || name === "memories" || name === "team" || name === "auth" || name === "permissions"
+            || name === "flows" || name === "flow") {
           if (name === "loop" && argument === "cancel" && session.busy) return this.request("slash.exec", { session_id: id, command: "cancel" });
           if (session.busy) throw new HermesRpcError(-32602, "작업이 끝난 뒤 명령을 실행하세요. 취소는 /cancel을 사용하세요.");
           const text = `/${name}${argument ? ` ${argument}` : ""}`;
