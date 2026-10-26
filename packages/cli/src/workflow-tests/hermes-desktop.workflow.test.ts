@@ -53,8 +53,9 @@ describe("Hermes Desktop 호환 서버", () => {
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'sidebar.nav'");
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'routes'");
       expect(LANGFLOW_PLUGIN_SOURCE).not.toMatch(/openWorkspace|statusBar/);
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("BRAND_TO = 'PERDIX'");
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("watchBrand(ctx)");
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("hideSplashWordmark");
+      expect(LANGFLOW_PLUGIN_SOURCE).toContain("watchSplash(ctx)");
+      expect(LANGFLOW_PLUGIN_SOURCE).not.toContain("PERDIX");
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("get_started_progress_title");
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("attachChromeHider");
 
