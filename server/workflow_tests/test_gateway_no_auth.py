@@ -69,3 +69,13 @@ async def test_foreign_origin_is_rejected(client: httpx2.AsyncClient) -> None:
 async def test_unknown_host_header_is_rejected(client: httpx2.AsyncClient) -> None:
     response = await client.get("/api/status", headers={**CLIENT, "Host": "evil.example"})
     assert response.status_code == 400
+
+
+def test_auth_defaults_to_none_on_loopback_and_token_elsewhere(tmp_path: Path) -> None:
+    # 개인용 기본값: 루프백은 토큰 없이, 그 밖의 호스트는 토큰을 요구한다.
+    assert make_config(tmp_path).auth == "none"
+    assert make_config(tmp_path, host="localhost").auth == "none"
+    assert make_config(tmp_path, host="0.0.0.0").auth == "token"
+    assert make_config(tmp_path, auth="token").auth == "token"
+    with pytest.raises(ValidationError):
+        make_config(tmp_path, host="0.0.0.0", auth="none")

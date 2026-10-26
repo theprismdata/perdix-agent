@@ -51,7 +51,7 @@ uv run perdix-gateway --config /절대/경로/gateway.json
 
 | 환경 변수 | 용도 | 필요 조건 |
 |---|---|---|
-| `PERDIX_GATEWAY_TOKEN` | 대시보드 Bearer 인증, 24자 이상 | 필수 |
+| `PERDIX_GATEWAY_TOKEN` | 대시보드 Bearer 인증, 24자 이상 | `auth: "token"`일 때만(루프백이 아닌 host) |
 | `PERDIX_TELEGRAM_TOKEN` | BotFather에서 만든 봇 토큰 | Telegram 활성화 |
 | `PERDIX_GITHUB_TOKEN` | GitHub REST 접근 | 비공개 저장소 읽기·결과 댓글 |
 | `PERDIX_GITHUB_WEBHOOK_SECRET` | GitHub Webhook HMAC 검증 | Webhook 접수 |
@@ -61,14 +61,15 @@ uv run perdix-gateway --config /절대/경로/gateway.json
 사용한다. 게이트웨이에서는 자식 env를 정리하므로 공급자 API 키 env 전달을 사용하지
 않는다. 기존 OpenAI OAuth 자격 증명 파일도 서버에서 사용할 수 있다.
 
-이 컴퓨터에서만 쓴다면 설정에 `"auth": "none"`을 넣어 연결 토큰 없이 쓸 수 있다.
-`host`가 `127.0.0.1`, `localhost`, `::1`일 때만 허용하며 `PERDIX_GATEWAY_TOKEN`도 필요 없다.
+`auth`를 생략하면 개인용 기본값으로 `host`가 `127.0.0.1`, `localhost`, `::1`일 때 `"none"`(연결
+토큰 없음), 그 밖의 host는 `"token"`이다. `"none"`은 루프백에서만 허용하며 `PERDIX_GATEWAY_TOKEN`도
+필요 없다. 루프백에서 토큰을 쓰고 싶으면 `"auth": "token"`을 명시한다.
 대시보드는 `X-Perdix-Client` 헤더가 있고 Origin이 로컬일 때만 요청을 받아, 다른 웹사이트가
 이 주소로 작업을 제출하지 못하게 한다. 같은 컴퓨터의 다른 프로그램은 이 헤더를 붙여 접속할
 수 있으므로, 여러 사용자가 쓰는 컴퓨터나 원격 접속에는 쓰지 않는다.
 
-브라우저에서 `http://127.0.0.1:18790`을 열고 연결 토큰을 입력한다. 토큰은 브라우저
-탭의 sessionStorage에만 보관한다. 작업 제출, 최근 200개 작업, 실행 기록, 취소,
+브라우저에서 `http://127.0.0.1:18790`을 열면 바로 연결된다(`auth: "token"`이면 연결 토큰을
+입력하며 토큰은 브라우저 탭의 sessionStorage에만 보관한다). 작업 제출, 최근 200개 작업, 실행 기록, 취소,
 도구 권한 승인을 제공한다. 권한 요청은 10분 뒤 자동 거절된다. 기록은 원본 ACP
 세션 DB와 별개인 `~/.perdix/gateway.db`에 append-only로 보관한다. 원격 사용은
 인증한 SSH 터널/TLS 프록시를 사용하고 기본 loopback 바인딩을 유지한다.

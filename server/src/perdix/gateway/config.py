@@ -1,7 +1,7 @@
 import hashlib
 import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
@@ -67,6 +67,7 @@ class GatewayConfig(BaseModel):
     port: int = Field(default=18790, ge=1, le=65535)
     token_env: str = "PERDIX_GATEWAY_TOKEN"
     # "none"은 이 컴퓨터에서만 접속하는 대시보드용이다. 루프백 호스트에서만 허용한다.
+    # 지정하지 않으면 개인용 기본값으로 루프백은 none, 그 밖의 호스트는 token이다.
     auth: Literal["token", "none"] = "token"
     db_path: Path = Path.home() / ".perdix" / "gateway.db"
     projects: dict[str, ProjectConfig] = Field(min_length=1)
@@ -74,6 +75,14 @@ class GatewayConfig(BaseModel):
     max_concurrent_jobs: int = Field(default=2, ge=1, le=8)
     telegram: TelegramConfig | None = None
     github: GitHubConfig | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_auth(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "auth" not in data:
+            loopback = data.get("host", "127.0.0.1") in LOOPBACK_HOSTS
+            return {**data, "auth": "none" if loopback else "token"}
+        return data
 
     @model_validator(mode="after")
     def check_projects(self) -> "GatewayConfig":
