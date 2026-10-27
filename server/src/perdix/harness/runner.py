@@ -9,9 +9,25 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any, Literal, Protocol
 
 from perdix.context.messages import ContentBlock
-from perdix.harness.turn import AskPermission, Sink, TurnResult, TurnRunner
+from perdix.harness.turn import AskPermission, Sink, TurnResult
+
+
+class TurnExecutor(Protocol):
+    """한 Turn을 실행하는 객체. `TurnRunner`와 `LangflowTurnRunner`(ADR 0027)가 구현한다."""
+
+    async def run(
+        self,
+        session_id: str,
+        prompt: list[ContentBlock],
+        *,
+        cancel: asyncio.Event,
+        sink: Sink,
+        ask_permission: AskPermission,
+        origin: Literal["user", "synthetic"] = "user",
+    ) -> TurnResult: ...
 
 
 class TurnBusyError(RuntimeError):
@@ -29,7 +45,7 @@ class SessionRunner:
     `TurnRunner`를 만들어 돌려준다(모드·모델 전환이 다음 Turn부터 반영된다).
     """
 
-    def __init__(self, make_turn_runner: Callable[[str], TurnRunner]) -> None:
+    def __init__(self, make_turn_runner: Callable[[str], TurnExecutor]) -> None:
         self._make_turn_runner = make_turn_runner
         self._locks: dict[str, asyncio.Lock] = {}
         self._cancels: dict[str, asyncio.Event] = {}
@@ -58,7 +74,7 @@ class SessionRunner:
         sink: Sink,
         ask_permission: AskPermission,
     ) -> TurnResult:
-        async def execute(runner: TurnRunner, cancel: asyncio.Event) -> TurnResult:
+        async def execute(runner: TurnExecutor, cancel: asyncio.Event) -> TurnResult:
             return await runner.run(
                 session_id, prompt, cancel=cancel, sink=sink, ask_permission=ask_permission
             )
@@ -68,7 +84,7 @@ class SessionRunner:
     async def run(
         self,
         session_id: str,
-        execute: Callable[[TurnRunner, asyncio.Event], Awaitable[TurnResult]],
+        execute: Callable[[Any, asyncio.Event], Awaitable[TurnResult]],
     ) -> TurnResult:
         """Turn 또는 외부 목표 루프 전체에 같은 슬롯과 취소 이벤트를 제공한다."""
         # 여기부터 lock 획득까지 await가 없어야 한다(동기 등록).

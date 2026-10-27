@@ -49,6 +49,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--fake-script", dest="fake_script", help="FakeProvider JSON script")
     parser.add_argument(
+        "--langflow-url", dest="langflow_url", help="Langflow 서버 URL (ADR 0027)"
+    )
+    parser.add_argument(
+        "--langflow-flow", dest="langflow_flow", help="Turn을 실행할 Langflow 플로우 ID 또는 이름"
+    )
+    parser.add_argument(
         "--agents-config",
         dest="agents_config_path",
         help="역할별 모델 오버라이드 JSON 파일 경로 (architecture.md §6.10)",

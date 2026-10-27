@@ -51,6 +51,9 @@ class ServerConfig(BaseModel):
     log_level: LogLevel = "INFO"
     # 공급자 키 파일. env가 우선한다(config/credentials.py).
     credentials_path: Path = DEFAULT_CREDENTIALS_PATH
+    # 둘 다 있으면 Turn을 Langflow 플로우가 실행한다(ADR 0027). 키는 env LANGFLOW_API_KEY만 쓴다.
+    langflow_url: str | None = None
+    langflow_flow: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -67,6 +70,10 @@ class ServerConfig(BaseModel):
             raise ValueError("--team과 --member를 함께 지정하세요")
         if self.team_worker and self.team is None:
             raise ValueError("--team-worker에는 --team과 --member가 필요합니다")
+        if (self.langflow_url is None) != (self.langflow_flow is None):
+            raise ValueError("--langflow-url과 --langflow-flow를 함께 지정하세요")
+        if self.langflow_url is not None and (self.team is not None or self.team_worker):
+            raise ValueError("Langflow 백엔드는 팀 모드를 지원하지 않습니다")
         if self.provider == "fake" and self.fake_script is None:
             raise ValueError("--provider fake requires --fake-script PATH")
         return self
