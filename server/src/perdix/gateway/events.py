@@ -24,6 +24,8 @@ class Job(BaseModel):
     status: JobStatus = "queued"
     session_id: str | None = None
     result: str = ""
+    agent: str = "perdix"
+    model: str | None = None
 
 
 class JobEvent(BaseModel):
@@ -83,6 +85,18 @@ class GatewayStore:
         ) as cursor:
             row = await cursor.fetchone()
         return str(row[0]) if row else None
+
+    async def selected_model(self, conversation: str) -> str | None:
+        assert self.db is not None
+        async with self.db.execute(
+            "SELECT data FROM gateway_events WHERE job_id=? AND kind='telegramModel' "
+            "ORDER BY seq DESC LIMIT 1", (conversation,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        value = json.loads(row[0])
+        return value if isinstance(value, str) else None
 
     async def events(self, job_id: str, after: int = 0) -> list[JobEvent]:
         assert self.db is not None

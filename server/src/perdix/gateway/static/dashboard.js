@@ -25,7 +25,7 @@ function notice(message, error = false) {
   byId("notice").className = error ? "error" : "";
 }
 async function api(path, body) {
-  const response = await fetch(path, { headers: { Authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
+  const response = await fetch(path, { headers: { "X-Perdix-Client": "dashboard", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body === undefined ? {} : { "Content-Type": "application/json" }) }, ...(body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }) });
   if (response.status === 401) disconnect();
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
@@ -173,8 +173,8 @@ async function refresh() {
 }
 async function connect() {
   const status = await api("/api/status");
-  sessionStorage.setItem("perdixGatewayToken", token);
-  connected = true; byId("login-panel").hidden = true; byId("workspace").hidden = false; byId("disconnect").hidden = false;
+  if (token) sessionStorage.setItem("perdixGatewayToken", token);
+  connected = true; byId("login-panel").hidden = true; byId("workspace").hidden = false; byId("disconnect").hidden = !token;
   byId("project").replaceChildren(...status.projects.map((project) => {
     const option = element("option", project.name); option.value = project.name; return option;
   }));
@@ -219,4 +219,5 @@ byId("theme").addEventListener("change", () => {
   else document.documentElement.dataset.theme = byId("theme").value;
 });
 setInterval(refresh, 2000);
-if (token) connect().catch((error) => notice(error.message, true));
+// 토큰 없는 로컬 모드면 바로 연결되고, 토큰 모드면 401로 조용히 로그인 화면에 남는다.
+connect().catch((error) => { if (token) notice(error.message, true); });

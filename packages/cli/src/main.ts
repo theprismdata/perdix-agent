@@ -11,14 +11,16 @@ import type { SessionHandle, SessionListItem } from "./agent/types.js";
 import { checkNodeVersion, VERSION } from "./version.js";
 
 const USAGE = `Usage: perdix [options]
-       perdix auth <login|status|logout>   계정 로그인 관리 (perdix auth help)
+       perdix auth <login|status|logout|list|use>   인증 프로필 관리 (perdix auth help)
 
 Options:
   -p, --prompt <text>        Run one prompt non-interactively and exit
       --json                 With -p: print events as NDJSON
       --cwd <dir>            Working directory (default: current directory)
-      --mode <id>            Session mode (chat | plan | build)
+      --mode <id>            Session mode (general | plan | build)
+      --provider <name>      anthropic | openai | gemini | openrouter | ollama
       --model <name>         Model id
+      --ollama-base-url <url> Ollama OpenAI-compatible endpoint
       --agents-config <path> Role model assignment file
       --team <name>          로컬 협업 팀 이름
       --member <name>        이 터미널의 구성원 이름
@@ -28,8 +30,11 @@ Options:
       --team-db <path>       공유 팀 SQLite 경로
       --resume <sessionId>   Resume a saved session
       --tui <name>          default | hermes (Hermes TUI 평가판)
+      --hermes-desktop      Hermes Desktop 앱이 접속할 호환 서버를 실행(주소·토큰 출력)
+      --langflow-config <f> Langflow 연동 설정 JSON(선택, docs/langflow.md)
+      --hermes-home <dir>   --hermes-desktop일 때 이 HERMES_HOME에 Langflow 화면 플러그인을 설치
       --list                 List saved sessions for the working directory
-      --permission-mode <m>  interactive | deny | accept-edits | allowlist (default with -p: deny)
+      --permission-mode <m>  interactive | deny | accept-edits | allowlist | yolo (default with -p: deny)
       --server <cmd>         Server command (overrides PERDIX_SERVER)
       --trust-project        Trust verification commands in the working directory
       --debug                Pass server stderr through instead of logging to ~/.perdix/logs
@@ -54,8 +59,12 @@ function parseCli(argv: string[]) {
       json: { type: "boolean", default: false },
       cwd: { type: "string" },
       mode: { type: "string" },
+      provider: { type: "string" },
       model: { type: "string" },
+      "ollama-base-url": { type: "string" },
       "agents-config": { type: "string" },
+      "langflow-config": { type: "string" },
+      "hermes-home": { type: "string" },
       team: { type: "string" },
       member: { type: "string" },
       "team-role": { type: "string" },
@@ -64,6 +73,7 @@ function parseCli(argv: string[]) {
       "team-db": { type: "string" },
       resume: { type: "string" },
       tui: { type: "string", default: "default" },
+      "hermes-desktop": { type: "boolean", default: false },
       list: { type: "boolean", default: false },
       "permission-mode": { type: "string" },
       "trust-project": { type: "boolean", default: false },
@@ -150,6 +160,11 @@ async function main(): Promise<number> {
     process.stderr.write("perdix: --tui는 default 또는 hermes여야 합니다.\n");
     return 2;
   }
+  if (args.provider !== undefined
+      && !["anthropic", "openai", "gemini", "openrouter", "ollama"].includes(args.provider)) {
+    process.stderr.write("perdix: 지원하지 않는 provider입니다.\n");
+    return 2;
+  }
   if (args.tui === "hermes" && !args["team-worker"] && !args.list
       && (args.prompt !== undefined || !process.stdin.isTTY)) {
     process.stderr.write("perdix: Hermes 평가판은 대화형 터미널에서 실행하세요. -p와 함께 사용할 수 없습니다.\n");
@@ -175,6 +190,12 @@ async function main(): Promise<number> {
   }
   const permissionMode = args["permission-mode"];
   const serverArgs = args["agents-config"] ? ["--agents-config", resolve(args["agents-config"])] : [];
+  if (args.provider) serverArgs.push("--provider", args.provider);
+  const langflowConfig = args["langflow-config"] ? resolve(args["langflow-config"]) : undefined;
+  if (langflowConfig) serverArgs.push("--langflow-config", langflowConfig);
+  if (args["ollama-base-url"]) {
+    serverArgs.push("--ollama-base-url", args["ollama-base-url"]);
+  }
   if (args.team && args.member) {
     serverArgs.push("--team", args.team, "--member", args.member,
       "--team-role", args["team-role"] ?? "member");
@@ -223,9 +244,30 @@ async function main(): Promise<number> {
       return 0;
     }
 
+    if (args["hermes-desktop"]) {
+      const [{ HermesAdapter }, { startHermesDesktopServer }] = await Promise.all([
+        import("./hermes/adapter.js"), import("./hermes/desktop-server.js"),
+      ]);
+      const adapter = new HermesAdapter(connection, { cwd, mode: args.mode, model });
+      const desktop = await startHermesDesktopServer(adapter, {
+        port: Number(process.env.PERDIX_HERMES_DESKTOP_PORT) || undefined, cwd, langflowConfig,
+        hermesHome: args["hermes-home"] ? resolve(args["hermes-home"]) : undefined,
+        token: process.env.PERDIX_HERMES_DESKTOP_TOKEN || undefined,
+        log: (line) => { if (args.debug) process.stderr.write(`[hermes-desktop] ${line}\n`); },
+      });
+      process.stdout.write(`HERMES_DESKTOP_REMOTE_URL=${desktop.url}\n`);
+      if (process.env.PERDIX_HERMES_DESKTOP_SHOW_TOKEN === "1") process.stdout.write(`HERMES_DESKTOP_REMOTE_TOKEN=${desktop.token}\n`);
+      await new Promise<void>((resolve) => {
+        process.once("SIGINT", resolve);
+        process.once("SIGTERM", resolve);
+      });
+      await desktop.close();
+      return 0;
+    }
+
     if (args.tui === "hermes") {
-      const [{ launchHermesTui }, { HermesAdapter }, { startHermesBridge }] = await Promise.all([
-        import("@perdix/hermes-tui"), import("./hermes/adapter.js"), import("./hermes/bridge.js"),
+      const [{ launchHermesTui }, { HermesAdapter }, { startHermesBridge }, { startMacTerminalImagePaste }] = await Promise.all([
+        import("@perdix/hermes-tui"), import("./hermes/adapter.js"), import("./hermes/bridge.js"), import("./hermes/macos-image-paste.js"),
       ]);
       const { runHermesAuth } = await import("./hermes/auth.js");
       const adapter = new HermesAdapter(connection, { cwd, mode: args.mode, model,
@@ -240,9 +282,12 @@ async function main(): Promise<number> {
         },
       });
       const bridge = await startHermesBridge(adapter);
+      let imagePaste: { close(): Promise<void> } | undefined;
       try {
+        imagePaste = await startMacTerminalImagePaste();
         return await launchHermesTui({ gatewayUrl: bridge.url, cwd, resume: args.resume, terminalHandoff: () => adapter.authenticating });
       } finally {
+        await imagePaste?.close();
         await bridge.close();
       }
     }

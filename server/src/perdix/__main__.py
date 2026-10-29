@@ -26,8 +26,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"perdix-server {__version__}")
     parser.add_argument("--db", dest="db_path", help="SQLite event log path")
     parser.add_argument(
-        "--provider", choices=["anthropic", "openai", "gemini", "openrouter", "fake"],
+        "--provider", choices=["anthropic", "openai", "gemini", "openrouter", "ollama", "fake"],
     )
+    parser.add_argument("--ollama-base-url")
     parser.add_argument("--model")
     parser.add_argument("--team")
     parser.add_argument("--member")
@@ -36,12 +37,17 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--team-db")
     parser.add_argument("--team-project")
     parser.add_argument("--openai-auth", choices=["login", "status", "logout"])
+    parser.add_argument("--auth-command", choices=["login", "logout", "status", "list", "use"])
+    parser.add_argument("--auth-provider", choices=["anthropic", "openai", "gemini", "openrouter"])
+    parser.add_argument("--auth-profile")
+    parser.add_argument("--auth-api-key-stdin", action="store_true")
     parser.add_argument("--effort")
+    parser.add_argument("--langflow-config", help="Langflow 연동 설정 JSON 파일(선택 기능)")
     parser.add_argument("--memory-config", help="자동 메모리 설정 JSON 파일")
     parser.add_argument(
         "--permission-mode",
         dest="permission_mode",
-        choices=["interactive", "deny", "accept-edits", "allowlist"],
+        choices=["interactive", "deny", "accept-edits", "allowlist", "yolo"],
     )
     parser.add_argument("--max-tokens", dest="max_tokens", type=int)
     parser.add_argument(
@@ -89,6 +95,30 @@ async def _serve(config: ServerConfig) -> None:
 def main() -> None:
     parser = _parser()
     args = parser.parse_args()
+    if args.auth_command is not None:
+        from pathlib import Path
+
+        from perdix.config.auth_commands import AuthCommand, run_profile_command
+        from perdix.config.auth_profiles import AuthProfiles
+        from perdix.config.credentials import DEFAULT_CREDENTIALS_PATH
+        from perdix.llm.base import ProviderError
+
+        try:
+            command = AuthCommand(
+                action=args.auth_command, provider=args.auth_provider or "anthropic",
+                profile=args.auth_profile,
+                api_key=sys.stdin.read() if args.auth_api_key_stdin else None,
+            )
+            profile_path = (Path(args.credentials_path) if args.credentials_path
+                            else DEFAULT_CREDENTIALS_PATH)
+            print(asyncio.run(run_profile_command(AuthProfiles(profile_path), command)))
+        except ValidationError:
+            parser.error("인증 프로필 이름·제공자·인증 방식을 확인하세요")
+        except (ProviderError, OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(1) from exc
+        return
+    del args.auth_command, args.auth_provider, args.auth_profile, args.auth_api_key_stdin
     if args.openai_auth is not None:
         from pathlib import Path
 
@@ -105,7 +135,20 @@ def main() -> None:
     del args.openai_auth
     memory_path = args.memory_config
     del args.memory_config
+    langflow_path = args.langflow_config
+    del args.langflow_config
     values: dict[str, Any] = {k: v for k, v in vars(args).items() if v is not None}
+    if langflow_path is not None:
+        from pathlib import Path
+
+        from perdix.integrations.langflow.config import LangflowConfig
+
+        try:
+            values["langflow"] = LangflowConfig.model_validate_json(
+                Path(langflow_path).read_text(encoding="utf-8")
+            )
+        except (OSError, ValidationError) as exc:
+            parser.error(f"Langflow 설정 파일을 읽지 못했습니다: {exc}")
     if memory_path is not None:
         from pathlib import Path
 

@@ -21,6 +21,7 @@ dependencies = [
 [project.scripts]
 perdix-server = "perdix.__main__:main"
 perdix-gateway = "perdix.gateway.__main__:main"
+perdix-modelapi = "perdix.modelapi.__main__:main"
 
 [dependency-groups]
 dev = [

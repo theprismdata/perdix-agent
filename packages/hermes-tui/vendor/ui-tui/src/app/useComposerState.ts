@@ -215,7 +215,9 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
 
       const r = await gw
         .request<ClipboardPasteResponse & { path?: string }>('clipboard.paste', { session_id: sid })
-        .catch(() => null)
+        .catch((error: unknown): ClipboardPasteResponse & { path?: string } => ({
+          message: error instanceof Error ? error.message : String(error)
+        }))
 
       if (r?.attached) {
         return attachImageToken(r, value, cursor)
@@ -350,11 +352,9 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
    */
   const appendAttachment = useCallback(
     (attach: (value: string, cursor: number) => Promise<ComposerPasteResult | null>) => {
-      const current = inputRef.current
-
-      void attach(current, current.length).then(next => {
+      void attach('', 0).then(next => {
         if (next) {
-          setInput(next.value)
+          setInput(current => current + next.value)
         }
       })
     },

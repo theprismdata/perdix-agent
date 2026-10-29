@@ -1,11 +1,14 @@
 import asyncio
 import hmac
+import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import httpx2
+import truststore
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -13,7 +16,7 @@ from pydantic.alias_generators import to_camel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from perdix.gateway.channels import GatewayChannels, GitHubImport, GitHubWebhook
-from perdix.gateway.config import GatewayConfig, GatewaySecrets
+from perdix.gateway.config import LOOPBACK_HOSTS, GatewayConfig, GatewaySecrets
 from perdix.gateway.events import GatewayStore, Job, JobEvent
 from perdix.gateway.runtime import GatewayRuntime, SubmitRequest
 
@@ -34,6 +37,7 @@ def create_app(
     store = GatewayStore(config.db_path)
     runtime = GatewayRuntime(config, store)
     http = httpx2.AsyncClient(
+        verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
         http2=True,
         timeout=httpx2.Timeout(35, connect=5),
         transport=transport,
@@ -66,7 +70,18 @@ def create_app(
         allowed_hosts=[config.host, "localhost", "127.0.0.1", "[::1]", "testserver"],
     )
 
-    async def authorize(authorization: Annotated[str | None, Header()] = None) -> None:
+    async def authorize(
+        request: Request, authorization: Annotated[str | None, Header()] = None
+    ) -> None:
+        if secrets.gateway is None:
+            # 토큰 없는 로컬 모드: 다른 사이트가 보낸 요청은 사용자 정의 헤더(사전 요청 필요)와
+            # Origin 검사로 막는다. DNS rebinding은 TrustedHostMiddleware가 막는다.
+            origin = request.headers.get("origin")
+            if request.headers.get("x-perdix-client") != "dashboard" or (
+                origin and urlsplit(origin).hostname not in {*LOOPBACK_HOSTS, "[::1]", "testserver"}
+            ):
+                raise HTTPException(403, "이 컴퓨터의 Perdix 대시보드에서만 접속할 수 있습니다")
+            return
         expected = "Bearer " + secrets.gateway.get_secret_value()
         if not authorization or not hmac.compare_digest(authorization.encode(), expected.encode()):
             raise HTTPException(401, "게이트웨이 연결 토큰을 확인하세요")

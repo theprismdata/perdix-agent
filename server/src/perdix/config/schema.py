@@ -8,11 +8,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from perdix.config.credentials import DEFAULT_CREDENTIALS_PATH
+from perdix.integrations.langflow.config import LangflowConfig
 from perdix.memory.schema import MemoryConfig
 from perdix.permissions.policy import PermissionMode
 from perdix.session.store import DEFAULT_DB_PATH
 
-ProviderName = Literal["anthropic", "openai", "gemini", "openrouter", "fake"]
+ProviderName = Literal["anthropic", "openai", "gemini", "openrouter", "ollama", "fake"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 DEFAULT_MODEL = "claude-opus-5-5"
@@ -25,6 +26,7 @@ DEFAULT_MODEL_FOR_PROVIDER: dict[str, str] = {
     "openai": "gpt-6.1-sol",
     "gemini": "gemini-3.8-flash",
     "openrouter": "qwen/qwen3-coder-flash",
+    "ollama": "qwen3:4b",
     "fake": DEFAULT_MODEL,
 }
 
@@ -37,6 +39,7 @@ class ServerConfig(BaseModel):
     team_db: Path = Path.home() / ".perdix" / "teams.sqlite3"
     team_project: Path | None = None
     memories: MemoryConfig = Field(default_factory=MemoryConfig)
+    langflow: LangflowConfig = Field(default_factory=LangflowConfig)
     trust_project: bool = False
     db_path: str = str(DEFAULT_DB_PATH)
     provider: ProviderName = "anthropic"
@@ -51,6 +54,7 @@ class ServerConfig(BaseModel):
     log_level: LogLevel = "INFO"
     # 공급자 키 파일. env가 우선한다(config/credentials.py).
     credentials_path: Path = DEFAULT_CREDENTIALS_PATH
+    ollama_base_url: str = "http://127.0.0.1:11434/v1"
 
     @model_validator(mode="before")
     @classmethod

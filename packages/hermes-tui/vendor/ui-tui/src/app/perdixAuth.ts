@@ -12,8 +12,8 @@ export async function runPerdixAuth(name: string, argument: string, ctx: SlashRu
   }
   if (words[0] === '--provider') words.shift()
   const selected = words[0] === 'claude' ? 'anthropic' : words[0]
-  if (words.length > 1 || (selected !== undefined && selected !== 'openai' && selected !== 'anthropic')) {
-    ctx.transcript.sys('공급자는 openai 또는 anthropic입니다. API 키는 채팅창에 입력하지 마세요.')
+  if (words.length > 1 || (selected !== undefined && !['openai', 'anthropic', 'gemini', 'openrouter'].includes(selected))) {
+    ctx.transcript.sys('공급자는 openai, anthropic, gemini, openrouter입니다. API 키는 채팅창에 입력하지 마세요.')
     return
   }
   patchUiState({ status: '인증 진행 중…' })

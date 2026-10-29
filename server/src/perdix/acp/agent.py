@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Literal, cast
@@ -66,9 +66,12 @@ from acp.schema import (
 )
 
 from perdix import __version__
+from perdix.acp.auth_profiles import AUTH_HELP, AUTH_PREFIX, SessionAuthProfiles
+from perdix.acp.flow_commands import FLOW_COMMANDS, run_flow_command
 from perdix.acp.mapping import to_session_update
 from perdix.acp.memories import MEMORY_OPTION_IDS, SessionMemories
 from perdix.config.agents import AGENT_ROLES, assign_openrouter, load_agents_config
+from perdix.config.auth_profiles import LEGACY, AuthProfiles
 from perdix.config.credentials import load_credentials
 from perdix.config.schema import ServerConfig
 from perdix.context.messages import (
@@ -96,13 +99,14 @@ from perdix.harness.modes import MODES, Mode
 from perdix.harness.runner import SessionRunner, TurnBusyError
 from perdix.harness.turn import TurnResult, TurnRunner, tool_title
 from perdix.harness.verifier import LoopCallbacks
+from perdix.integrations.langflow.client import LangflowClient
 from perdix.llm import catalog
-from perdix.llm.anthropic import AnthropicProvider
 from perdix.llm.base import Provider, ProviderError
 from perdix.llm.fake import FakeProvider
-from perdix.llm.gemini import GeminiProvider
-from perdix.llm.openai import OpenAIProvider
-from perdix.llm.openrouter import OpenRouterProvider
+from perdix.llm.ollama import OllamaProvider
+from perdix.llm.profile_provider import profile_provider
+from perdix.mcp.config import servers_from_acp
+from perdix.mcp.hub import McpHub
 from perdix.memory.worker import MemoryWorker
 from perdix.permissions.policy import PermissionMode, PermissionPolicy
 from perdix.sandbox.local import LocalBackend
@@ -110,9 +114,10 @@ from perdix.session.recovery import repair_unpaired_tool_uses
 from perdix.session.store import Event, EventStore, ModeChangePayload, SessionRecord
 from perdix.teams.models import TeamCommand, TeamError
 from perdix.teams.store import TeamStore
-from perdix.tools.base import ToolKind, ToolOutput
+from perdix.tools.base import Tool, ToolKind, ToolOutput
+from perdix.tools.langflow import LangflowRunTool
 from perdix.tools.mode import SwitchModeTool
-from perdix.tools.registry import ToolRegistry, builtin_tools
+from perdix.tools.registry import READ_ONLY_KINDS, ToolRegistry, builtin_tools
 from perdix.tools.team import TeamTool
 
 logger = logging.getLogger(__name__)
@@ -126,7 +131,7 @@ PromptBlock = (
     | EmbeddedResourceContentBlock
 )
 
-DEFAULT_MODE: Final = "chat"
+DEFAULT_MODE: Final = "general"
 MODEL_CONFIG_ID: Final = "model"
 TEAM_HELP: Final = (
     "/team status  구성원과 작업 상태 조회\n"
@@ -138,6 +143,7 @@ TEAM_HELP: Final = (
 )
 # 오른쪽일수록 엄격하다. `_meta.perdix.permissionMode`는 argv보다 완화할 수 없다.
 PERMISSION_STRICTNESS: Final[dict[PermissionMode, int]] = {
+    "yolo": -1,
     "interactive": 0,
     "accept-edits": 1,
     "allowlist": 2,
@@ -161,6 +167,8 @@ class _SessionState:
     model: str
     permission_mode: PermissionMode
     policy: PermissionPolicy
+    # MCP 서버가 제공한 도구(ADR 0034). 세션을 만들거나 불러올 때 채운다.
+    mcp_tools: list[Tool] = field(default_factory=list)
 
 
 def stricter_permission_mode(base: PermissionMode, requested: Any) -> PermissionMode:
@@ -206,7 +214,15 @@ def _session_modes(current: str) -> SessionModeState:
 
 def _model_option(current: str) -> SessionConfigOptionSelect:
     options = [
-        SessionConfigSelectOption(value=m.id, name=m.id, description=f"provider: {m.provider}")
+        SessionConfigSelectOption(
+            value=m.id,
+            name=m.id,
+            description=(
+                f"provider: {m.provider}\n미설치 시 실행: ollama pull {m.id}"
+                if m.provider == "ollama"
+                else f"provider: {m.provider}"
+            ),
+        )
         for m in catalog.all_models()
     ]
     if current not in {o.value for o in options}:
@@ -218,6 +234,14 @@ def _model_option(current: str) -> SessionConfigOptionSelect:
         type="select",
         current_value=current,
         options=options,
+    )
+
+
+def _permission_option(current: PermissionMode) -> SessionConfigOptionSelect:
+    return SessionConfigOptionSelect(
+        id="permission_mode", name="권한 모드", type="select", current_value=current,
+        options=[SessionConfigSelectOption(value=mode, name=mode)
+                 for mode in PERMISSION_STRICTNESS],
     )
 
 
@@ -237,17 +261,21 @@ class PerdixAgent:
         self._sessions: dict[str, _SessionState] = {}
         self._teams: dict[str, TeamStore] = {}
         self._runner = SessionRunner(self._make_turn_runner)
-        self._registry = ToolRegistry(builtin_tools())
+        self._langflow = LangflowClient(config.langflow) if config.langflow.enabled else None
+        self._registry = ToolRegistry(self._builtin_tools())
+        self._mcp = McpHub()
         self._sandbox = LocalBackend()
+        self._auth = SessionAuthProfiles(AuthProfiles(config.credentials_path))
         self._providers: dict[str, Provider] = {}
-        self._credentials = load_credentials(config.credentials_path)
         self._fake: FakeProvider | None = None
         if config.provider == "fake":
             if config.fake_script is None:
                 raise ValueError("--provider fake requires --fake-script PATH")
             self._fake = FakeProvider.from_file(config.fake_script)
         self._agents_config = load_agents_config(config.agents_config_path)
-        self._openrouter_models: dict[str, str] = {}
+        self._openrouter_models: dict[str, str] = {
+            model.id: model.id for model in catalog.all_models() if model.provider == "openrouter"
+        }
         self._memories = SessionMemories(config.memories)
         self._memory_fake = (
             FakeProvider.from_file(config.memories.fake_script)
@@ -286,7 +314,7 @@ class PerdixAgent:
         async with self._store_lock:
             if self._store is None:
                 self._store = await EventStore.open(self.config.db_path)
-                worker = MemoryWorker(self._store, self.config.memories)
+                worker = MemoryWorker(self._store, self.config.memories, self._memory_provider_for)
                 self._memories.worker = worker
                 if self._fake is None or self._memory_fake is not None:
                     worker.start(
@@ -296,6 +324,7 @@ class PerdixAgent:
             return self._store
 
     async def aclose(self) -> None:
+        await self._mcp.aclose()
         for team in self._teams.values():
             await team.leave()
         if self._memories.worker is not None:
@@ -313,25 +342,44 @@ class PerdixAgent:
         except KeyError:
             return self.config.provider
 
-    def _provider_for(self, model: str) -> Provider:
+    def _builtin_tools(self) -> list[Tool]:
+        tools = builtin_tools()
+        if self._langflow is not None:
+            tools.append(LangflowRunTool(self.config.langflow))
+        return tools
+
+    def _memory_provider_for(self, model: str, events: list[Event]) -> Provider:
+        if self._memory_fake is not None:
+            return self._memory_fake
+        auth = SessionAuthProfiles(self._auth.profiles)
+        auth.restore("memory", events)
+        provider_name = self._provider_name_for(model)
+        if provider_name == "ollama":
+            return OllamaProvider(model, base_url=self.config.ollama_base_url)
+        return profile_provider(self._auth.profiles, model, provider_name,
+                                auth.selection("memory", provider_name))
+
+    def _provider_for(self, model: str, *, session_id: str | None = None,
+                      role_id: str | None = None) -> Provider:
         if self._fake is not None:
             return self._fake
-        provider = self._providers.get(model)
-        if provider is None:
-            if self._provider_name_for(model) == "openai":
-                provider = OpenAIProvider(model, credentials_path=self.config.credentials_path)
-            elif self._provider_name_for(model) == "gemini":
-                provider = GeminiProvider(model, api_key=self._credentials.api_key("gemini"))
-            elif self._provider_name_for(model) == "openrouter":
-                provider = OpenRouterProvider(
-                    model, api_key=self._credentials.api_key("openrouter"),
+        provider_name = self._provider_name_for(model)
+        if provider_name == "ollama":
+            if model not in self._providers:
+                self._providers[model] = OllamaProvider(
+                    model, base_url=self.config.ollama_base_url,
                 )
-            else:
-                provider = AnthropicProvider(
-                    model,
-                    api_key=self._credentials.api_key("anthropic"),
-                    auth_token=self._credentials.auth_token("anthropic"),
-                )
+            return self._providers[model]
+        role = self._agents_config.role(role_id) if role_id is not None else None
+        selection = (
+            role.auth_profile if role is not None and role.auth_profile is not None else
+            self._auth.selection(session_id, provider_name) if session_id is not None else
+            self._auth.profiles.defaults().get(provider_name, LEGACY)
+        )
+        if selection == LEGACY and model in self._providers:
+            return self._providers[model]
+        provider = profile_provider(self._auth.profiles, model, provider_name, selection)
+        if selection == LEGACY:
             self._providers[model] = provider
         return provider
 
@@ -341,6 +389,28 @@ class PerdixAgent:
         except KeyError:
             supports = False
         return self.config.effort if supports else None
+
+    def _mcp_tools_for(self, state: _SessionState) -> list[Tool]:
+        """읽기 전용 모드에는 사용자가 readOnly로 지정한 MCP 도구만 노출한다."""
+        if state.mode.read_only:
+            return [tool for tool in state.mcp_tools if tool.kind in READ_ONLY_KINDS]
+        return list(state.mcp_tools)
+
+    async def _attach_mcp(
+        self, state: _SessionState, client_servers: list[McpServer] | None
+    ) -> None:
+        """MCP 서버를 연결해 세션 도구를 채운다. 실패해도 세션은 계속된다(ADR 0034)."""
+        trusted = self._trusted_root is not None and self._trusted_root == state.cwd.resolve()
+        try:
+            attached = await self._mcp.tools_for(
+                state.cwd, trust_project=trusted, client_servers=servers_from_acp(client_servers)
+            )
+        except Exception:
+            logger.exception("MCP 도구를 불러오지 못했습니다")
+            return
+        state.mcp_tools = list(attached.tools)
+        for name in attached.auto_allow:
+            state.policy.rules[name] = "allow"
 
     def _make_turn_runner(self, session_id: str) -> TurnRunner:
         state = self._sessions[session_id]
@@ -352,21 +422,25 @@ class PerdixAgent:
                 await self.set_session_mode(session_id, mode_id)
             runner.mode = state.mode
             runner.model = state.model
-            runner.provider = self._provider_for(state.model)
+            runner.provider = self._provider_for(state.model, session_id=session_id,
+                                                 role_id=state.mode.id)
             runner.effort = self._session_effort(state)
             tools = self._registry.read_only_only() if state.mode.read_only else self._registry
             available = [tools.get(name) for name in tools.names()]
             runner.registry = ToolRegistry([
                 *(tool for tool in available if tool is not None),
                 *team_tools,
+                *self._mcp_tools_for(state),
                 mode_tool,
             ])
 
         mode_tool = SwitchModeTool(switch_mode)
         runner = TurnRunner(
             store=self._store,
-            provider=self._provider_for(state.model),
-            registry=ToolRegistry([*builtin_tools(), *team_tools]),
+            provider=self._provider_for(state.model, session_id=session_id, role_id=state.mode.id),
+            registry=ToolRegistry([
+                *self._builtin_tools(), *team_tools, *self._mcp_tools_for(state),
+            ]),
             policy=state.policy,
             sandbox=self._sandbox,
             budget=Budget(),
@@ -381,9 +455,17 @@ class PerdixAgent:
             model=state.model,
             max_tokens=self.config.max_tokens,
             effort=self._session_effort(state),
-            provider_factory=self._provider_for,
+            provider_factory=lambda model: self._provider_for(model, session_id=session_id),
+            role_provider_factory=lambda model, role: self._provider_for(
+                model, session_id=session_id, role_id=role,
+            ),
+            compactor_factory=lambda model: self._provider_for(
+                model, session_id=session_id, role_id="compactor",
+            ),
+            auth_profiles=self._auth.selections.get(session_id),
             agents_config=self._agents_config,
             memory_root=self.config.memories.root,
+            langflow=self._langflow,
             before_model=(lambda: self._receive_team(session_id)) if team else None,
         )
         tools = [runner.registry.get(name) for name in runner.registry.names()]
@@ -488,10 +570,18 @@ class PerdixAgent:
         from perdix.llm.openai_credentials import oauth_path
         from perdix.llm.openai_oauth import OpenAiOAuth
 
-        credentials = load_credentials(self.config.credentials_path)
-        if not credentials.api_key("openai"):
+        selection = self._auth.profiles.defaults()["openai"]
+        profile = self._auth.profiles.read().get_profile("openai", selection)
+        path = (self._auth.profiles.credential_path(profile) if profile is not None
+                else self.config.credentials_path)
+        credentials = load_credentials(path)
+        if not credentials.api_key("openai", env={} if profile else None):
+            if profile is not None and profile.method == "api_key":
+                raise RequestError.invalid_params({"reason": "API 키 재등록이 필요합니다"})
             try:
-                await OpenAiOAuth(oauth_path(self.config.credentials_path)).access_token()
+                await OpenAiOAuth(oauth_path(path)).access_token()
+                if profile is not None and not profile.enabled:
+                    self._auth.profiles.save(profile.model_copy(update={"enabled": True}))
             except ProviderError as exc:
                 raise RequestError(-32603, str(exc)) from exc
         return AuthenticateResponse()
@@ -539,16 +629,19 @@ class PerdixAgent:
             permission_mode=permission_mode,
             policy=PermissionPolicy(mode=permission_mode),
         )
+        await self._auth.create(store, record.id)
         try:
             await self._join_team(record.id)
         except TeamError as exc:
             raise RequestError(-32600, str(exc)) from exc
+        await self._attach_mcp(self._sessions[record.id], mcp_servers)
         await self._advertise_commands(record.id)
         return NewSessionResponse(
             session_id=record.id,
             modes=_session_modes(mode_id),
-            config_options=[_model_option(model), *self._memories.options(record.id),
-                            *self._assignment_options()],
+            config_options=[_permission_option(permission_mode), _model_option(model),
+                            *self._memories.options(record.id),
+                            *self._assignment_options(), *self._auth.options(record.id)],
         )
 
     async def load_session(
@@ -563,13 +656,15 @@ class PerdixAgent:
         # 본문은 TurnBusyError를 던지지 않으므로 여기서 잡히는 것은 락 획득 실패뿐이다.
         try:
             async with self._runner.guard(session_id):
-                return await self._load_locked(session_id, cwd)
+                return await self._load_locked(session_id, cwd, mcp_servers)
         except TurnBusyError as exc:
             raise RequestError.invalid_request(
                 {"sessionId": session_id, "reason": "turn in progress"}
             ) from exc
 
-    async def _load_locked(self, session_id: str, cwd: str) -> LoadSessionResponse:
+    async def _load_locked(
+        self, session_id: str, cwd: str, mcp_servers: list[McpServer] | None = None
+    ) -> LoadSessionResponse:
         store = await self._get_store()
         record = await store.get_session(session_id)
         if record is None:
@@ -578,17 +673,21 @@ class PerdixAgent:
         await self._recover(store, session_id)
         events = await store.events(session_id)
         self._memories.restore(session_id, events)
+        self._auth.restore(session_id, events)
         self._sessions[session_id] = self._restore_state(record, events, cwd)
         try:
             await self._join_team(session_id)
         except TeamError as exc:
             raise RequestError(-32600, str(exc)) from exc
+        await self._attach_mcp(self._sessions[session_id], mcp_servers)
         await self._replay(session_id, events)
         await self._advertise_commands(session_id)
         return LoadSessionResponse(
             modes=_session_modes(self._sessions[session_id].mode.id),
-            config_options=[_model_option(self._sessions[session_id].model),
-                            *self._memories.options(session_id), *self._assignment_options()],
+            config_options=[_permission_option(self._sessions[session_id].permission_mode),
+                            _model_option(self._sessions[session_id].model),
+                            *self._memories.options(session_id), *self._assignment_options(),
+                            *self._auth.options(session_id)],
         )
 
     async def _recover(self, store: EventStore, session_id: str) -> None:
@@ -608,6 +707,14 @@ class PerdixAgent:
                     permission_mode = stricter_permission_mode(
                         self.config.permission_mode, change.value
                     )
+                elif change.key == "permission_mode_selection":
+                    selected = next((mode for mode in PERMISSION_STRICTNESS
+                                     if mode == change.value), None)
+                    if selected is not None:
+                        permission_mode = (selected if self.config.permission_mode
+                                           in ("interactive", "yolo") else
+                                           stricter_permission_mode(
+                                               self.config.permission_mode, selected))
             elif ev.kind == "assistant_message":
                 for use in ev.as_assistant_message().tool_uses():
                     uses[use.id] = use
@@ -751,6 +858,37 @@ class PerdixAgent:
         self, config_id: str, session_id: str, value: str | bool, **kwargs: Any
     ) -> SetSessionConfigOptionResponse | None:
         state = self._state(session_id)
+        if config_id == "permission_mode":
+            try:
+                async with self._runner.guard(session_id):
+                    await self._select_permission_mode(session_id, value)
+            except TurnBusyError as exc:
+                raise RequestError.invalid_params(
+                    {"reason": "작업 종료 후 권한을 변경하세요."},
+                ) from exc
+            options = [_permission_option(state.permission_mode), _model_option(state.model),
+                       *self._memories.options(session_id), *self._assignment_options(),
+                       *self._auth.options(session_id)]
+            await self._send(session_id, ConfigOptionUpdate(
+                session_update="config_option_update", config_options=list(options),
+            ))
+            return SetSessionConfigOptionResponse(config_options=list(options))
+        if config_id.startswith(AUTH_PREFIX):
+            try:
+                async with self._runner.guard(session_id):
+                    store = await self._get_store()
+                    await self._auth.set_option(store, session_id, config_id, value)
+            except TurnBusyError as exc:
+                raise RequestError.invalid_request(
+                    {"reason": "작업 종료 후 인증을 변경하세요"},
+                ) from exc
+            options = [_permission_option(state.permission_mode), _model_option(state.model),
+                       *self._memories.options(session_id),
+                       *self._assignment_options(), *self._auth.options(session_id)]
+            await self._send(session_id, ConfigOptionUpdate(
+                session_update="config_option_update", config_options=list(options),
+            ))
+            return SetSessionConfigOptionResponse(config_options=list(options))
         if config_id == "openrouter_catalog" or config_id.startswith("agent_model_"):
             if self._runner.is_running(session_id):
                 raise RequestError.invalid_params({"reason": "작업 종료 후 설정하세요."})
@@ -779,8 +917,9 @@ class PerdixAgent:
                     raise RequestError.invalid_params({"reason": "agents.json 저장 실패"}) from exc
                 if role == state.mode.id:
                     await self.set_config_option(MODEL_CONFIG_ID, session_id, value)
-            options = [_model_option(state.model), *self._memories.options(session_id),
-                       *self._assignment_options()]
+            options = [_permission_option(state.permission_mode), _model_option(state.model),
+                       *self._memories.options(session_id),
+                       *self._assignment_options(), *self._auth.options(session_id)]
             await self._send(session_id, ConfigOptionUpdate(
                 session_update="config_option_update", config_options=list(options),
             ))
@@ -788,8 +927,9 @@ class PerdixAgent:
         if config_id in MEMORY_OPTION_IDS:
             store = await self._get_store()
             await self._memories.set_option(store, session_id, config_id, value)
-            options = [_model_option(state.model), *self._memories.options(session_id),
-                       *self._assignment_options()]
+            options = [_permission_option(state.permission_mode), _model_option(state.model),
+                       *self._memories.options(session_id),
+                       *self._assignment_options(), *self._auth.options(session_id)]
             await self._send(session_id, ConfigOptionUpdate(
                 session_update="config_option_update", config_options=list(options),
             ))
@@ -808,13 +948,28 @@ class PerdixAgent:
             provider=self._fake.name if self._fake is not None else self._provider_name_for(value),
         )
         await store.append(session_id, "config_change", {"key": "model", "value": value})
-        options = [_model_option(value), *self._memories.options(session_id),
-                   *self._assignment_options()]
+        options = [_permission_option(state.permission_mode), _model_option(value),
+                   *self._memories.options(session_id),
+                   *self._assignment_options(), *self._auth.options(session_id)]
         await self._send(
             session_id,
             ConfigOptionUpdate(session_update="config_option_update", config_options=list(options)),
         )
         return SetSessionConfigOptionResponse(config_options=list(options))
+
+    async def _select_permission_mode(self, session_id: str, value: str | bool) -> None:
+        selected = next((mode for mode in PERMISSION_STRICTNESS if mode == value), None)
+        if selected is None:
+            raise RequestError.invalid_params({"value": value, "reason": "unknown permission mode"})
+        if (self.config.permission_mode not in ("interactive", "yolo")
+                and stricter_permission_mode(self.config.permission_mode, selected) != selected):
+            raise RequestError.invalid_params({"reason": "서버의 권한 제한을 완화할 수 없습니다."})
+        store = await self._get_store()
+        await store.append(session_id, "config_change",
+                           {"key": "permission_mode_selection", "value": selected})
+        state = self._state(session_id)
+        state.permission_mode = selected
+        state.policy.mode = selected
 
     # ------------------------------------------------------------ Turn
 
@@ -825,6 +980,18 @@ class PerdixAgent:
                 update=AvailableCommandsUpdate(
                     session_update="available_commands_update",
                     available_commands=[
+                        AvailableCommand(
+                            name="permissions", description="실행 중 권한 모드 조회·변경",
+                            input=AvailableCommandInput.model_validate({
+                                "hint": "interactive | yolo | deny | accept-edits | allowlist",
+                            }),
+                        ),
+                        AvailableCommand(
+                            name="auth", description="제공자별 인증 프로필 조회·선택",
+                            input=AvailableCommandInput.model_validate({
+                                "hint": "status | list | use <제공자> <프로필|legacy>",
+                            }),
+                        ),
                         AvailableCommand(
                             name="team", description="팀 상태 조회 또는 종료",
                             input=AvailableCommandInput.model_validate({"hint": "status | stop"}),
@@ -842,6 +1009,20 @@ class PerdixAgent:
                                 {"hint": "use on|off | generate on|off"}
                             ),
                         ),
+                        *(
+                            [
+                                AvailableCommand(
+                                    name="flows", description="사용할 수 있는 Langflow 플로우 목록",
+                                ),
+                                AvailableCommand(
+                                    name="flow", description="Langflow 플로우를 직접 실행합니다",
+                                    input=AvailableCommandInput.model_validate(
+                                        {"hint": "<별칭> <입력>"}
+                                    ),
+                                ),
+                            ]
+                            if self._langflow is not None else []
+                        ),
                     ],
                 ),
             )
@@ -854,6 +1035,41 @@ class PerdixAgent:
         blocks = to_content_blocks(prompt)
         if len(blocks) == 1 and isinstance(blocks[0], TextBlock):
             command_text = blocks[0].text.strip()
+            words = command_text.split()
+            if words and words[0] == "/permissions":
+                if len(words) > 2:
+                    raise RequestError.invalid_params({"reason": "/permissions <모드>"})
+                if len(words) == 2:
+                    await self.set_config_option("permission_mode", session_id, words[1])
+                reply = (f"현재 권한 모드: {self._state(session_id).permission_mode}\n"
+                         "/permissions interactive | yolo | deny | accept-edits | allowlist\n")
+                await self._notify(session_id, TextDelta(text=reply))
+                return PromptResponse(stop_reason="end_turn")
+            if words and words[0] == "/auth":
+                reply = AUTH_HELP
+                if words in (["/auth"], ["/auth", "status"]):
+                    auth_state = self._state(session_id)
+                    reply = self._auth.status(session_id)
+                    role = self._agents_config.role(auth_state.mode.id)
+                    if role is not None and role.auth_profile is not None:
+                        reply += f"\n현재 역할 {auth_state.mode.id} 우선 인증: {role.auth_profile}"
+                elif words == ["/auth", "list"]:
+                    from perdix.config.auth_commands import AuthCommand, run_profile_command
+
+                    reply = await run_profile_command(
+                        self._auth.profiles, AuthCommand(action="list"),
+                    )
+                elif len(words) == 4 and words[1] == "use":
+                    await self.set_config_option(AUTH_PREFIX + words[2], session_id, words[3])
+                    reply = self._auth.status(session_id)
+                await self._notify(session_id, TextDelta(text=reply + "\n"))
+                return PromptResponse(stop_reason="end_turn")
+            if words and words[0] in FLOW_COMMANDS:
+                reply = await run_flow_command(
+                    command_text, self.config.langflow, self._langflow, session_id,
+                )
+                await self._notify(session_id, TextDelta(text=reply))
+                return PromptResponse(stop_reason="end_turn")
             if command_text == "/team" or command_text.startswith("/team "):
                 if (self.config.team is None
                         or command_text not in ("/team status", "/team stop", "/team leave")):
@@ -922,7 +1138,8 @@ class PerdixAgent:
                 session_id, "user_message", {"content": [b.model_dump() for b in blocks]}
             )
             turn.registry = ToolRegistry([
-                *builtin_tools(), *([TeamTool(team)] if team is not None else []),
+                *self._builtin_tools(), *([TeamTool(team)] if team is not None else []),
+                *self._mcp_tools_for(self._state(session_id)),
             ])
             return await GoalRunner(
                 turn, LoopCallbacks(session_id, cancel, sink, ask_permission)
@@ -990,6 +1207,10 @@ class PerdixAgent:
             PermissionOption(option_id=kind, name=_OPTION_NAMES[kind], kind=kind)
             for kind in req.options
         ]
+        if self.config.permission_mode in ("interactive", "yolo"):
+            options.append(PermissionOption(
+                option_id="yolo", name="YOLO — 이 세션의 모든 도구 허용", kind="allow_always",
+            ))
         tool_call = ToolCallUpdate(
             tool_call_id=req.tool_use_id,
             title=req.title,
@@ -1006,6 +1227,16 @@ class PerdixAgent:
             return PermissionOutcome(outcome="reject_once")
         outcome = response.outcome
         if isinstance(outcome, AllowedOutcome):
+            if outcome.option_id == "yolo" and any(o.option_id == "yolo" for o in options):
+                await self._select_permission_mode(session_id, "yolo")
+                state = self._state(session_id)
+                await self._send(session_id, ConfigOptionUpdate(
+                    session_update="config_option_update",
+                    config_options=[_permission_option("yolo"), _model_option(state.model),
+                                    *self._memories.options(session_id),
+                                    *self._assignment_options(), *self._auth.options(session_id)],
+                ))
+                return PermissionOutcome(outcome="allow_once")
             if outcome.option_id in _OPTION_NAMES:
                 return PermissionOutcome(outcome=outcome.option_id)
             logger.warning("unknown permission option %r; rejecting", outcome.option_id)

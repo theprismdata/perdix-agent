@@ -2,9 +2,11 @@
  * CLI 내부 계약: ACP 연결 계층(agent/)과 UI 계층(ui/)이 공유하는 타입.
  * UI는 이 파일만 보고 렌더링하고, agent/는 ACP SessionUpdate를 이 이벤트로 변환한다.
  */
-import type { PermissionOptionKind, ToolKind, StopReason } from "@perdix/protocol";
+import type { ContentBlock, PermissionOptionKind, ToolKind, StopReason } from "@perdix/protocol";
 
-export type SessionMode = "chat" | "plan" | "build";
+export type PromptImage = Extract<ContentBlock, { type: "image" }>;
+
+export type SessionMode = "general" | "plan" | "build";
 
 export interface ModeInfo {
   id: string;
@@ -90,7 +92,7 @@ export type PermissionAnswer = { optionId: string } | { cancelled: true };
 export interface SessionHandle {
   readonly info: SessionInfo;
   /** 사용자 프롬프트 1회. 응답이 올 때까지 resolve하지 않는다. */
-  prompt(text: string): Promise<{ stopReason: string; verification?: string | null }>;
+  prompt(text: string, images?: readonly PromptImage[]): Promise<{ stopReason: string; verification?: string | null }>;
   cancel(): Promise<void>;
   setMode(modeId: string): Promise<void>;
   setModel(model: string): Promise<void>;

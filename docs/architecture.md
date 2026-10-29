@@ -102,7 +102,7 @@ perdix-agent/
 │   │   │   ├── verifier.py    # 검증 게이트(테스트/린트/타입체크/리뷰어)
 │   │   │   ├── budget.py      # 토큰/시간/반복 예산
 │   │   │   ├── hooks.py       # pre/post tool, on_turn_end 등 훅 버스
-│   │   │   └── modes.py       # chat / plan / build 모드 정의
+│   │   │   └── modes.py       # general / plan / build 모드 정의
 │   │   ├── context/
 │   │   │   ├── builder.py     # 시스템 프롬프트 조립(캐시 친화 순서)
 │   │   │   ├── instructions.py# AGENTS.md / CLAUDE.md(@import) 탐색·병합
@@ -114,7 +114,7 @@ perdix-agent/
 │   │   │   ├── base.py        # Provider 프로토콜, ModelRequest/ModelEvent
 │   │   │   ├── anthropic.py   # anthropic SDK (adaptive thinking, prompt caching)
 │   │   │   ├── openai.py      # Responses API
-│   │   │   ├── openai_compat.py # chat/completions (Ollama, vLLM, OpenRouter, LM Studio)
+│   │   │   ├── ollama.py        # 로컬 OpenAI 호환 Responses API
 │   │   │   ├── gemini.py
 │   │   │   └── catalog.py     # 모델 메타(컨텍스트 창, 가격, 기능 플래그)
 │   │   ├── tools/
@@ -182,7 +182,7 @@ perdix-agent/
 ### 6.2 모드 (`harness/modes.py`)
 | 모드 | 도구 | 검증 게이트 | 용도 |
 |---|---|---|---|
-| `chat` | 전체 | 없음 | 일반 질의응답, 단발 작업 |
+| `general` | 전체 | 없음 | 일반 질의응답, 단발 작업 |
 | `plan` | `is_read_only(input)`이 참인 도구 전체(read/grep/glob/ls/webfetch/websearch/session_search/skill/todo/task(explore·reviewer·security-reviewer)) | 없음 | 계획 수립, 분석 |
 | `build` | 전체 | **있음** | 자율 구현. 완료 조건 만족까지 반복 |
 
@@ -195,7 +195,7 @@ perdix-agent/
 - 어댑터별 특이사항:
   - **anthropic**: 공식 `anthropic` SDK, 스트리밍 필수, adaptive thinking 기본, `cache_control` 브레이크포인트(시스템/도구 뒤, 마지막 user 앞), thinking/redacted_thinking 블록을 tool_use 앞 순서 그대로 회신, `refusal` stop reason 처리.
   - **openai**: Responses API, `store=false` + `include=["reasoning.encrypted_content"]`로 stateless 운용. reasoning item은 바로 뒤의 item과 함께 보낸다.
-  - **openai_compat**: chat/completions. Ollama/vLLM/LM Studio/OpenRouter. 비어 오는 tool_call id는 생성해 채운다. 기능 플래그(도구 지원 여부, 병렬 호출)로 분기.
+  - **ollama**: 로컬 OpenAI 호환 Responses API. 인증 없이 설정된 base URL로 연결하고 기존 OpenAI Responses 이벤트 변환을 재사용한다.
   - **gemini**: 공식 SDK. functionCall part의 `thoughtSignature`를 그대로 회신하고 part 순서를 바꾸지 않는다. functionResponse는 한 content에 호출 순서대로.
 - `catalog.py`는 모델별 컨텍스트 창/출력 한도/기능 플래그를 가짐. 컴팩션 임계와 예산 계산의 입력.
 
@@ -223,7 +223,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 | AGENTS.md | cwd에서 루트까지 상향 + 작업 중인 하위 디렉터리 | 가까운 것이 우선, 전부 병합 |
 | CLAUDE.md | `./CLAUDE.md`, `.claude/CLAUDE.md`, `~/.claude/CLAUDE.md`, `CLAUDE.local.md` | `@path` 임포트 해석 |
 | skills | `.claude/skills/*/SKILL.md`, `.agents/skills/*/SKILL.md`, `~/.claude/skills`, `~/.agents/skills` | frontmatter(name/description)만 시스템 프롬프트에 노출, 본문은 `skill` 도구로 지연 로드 |
-| MCP | ACP `session/new`의 `mcpServers`, `.perdix/config.json`, `.mcp.json`, `.codex/config.toml [mcp_servers]`, 전역(`~/.perdix`, `~/.claude.json`) | 우선순위: ACP > `.perdix` > `.mcp.json` > `.codex` > 전역. 동일 이름은 상위가 덮어쓴다 |
+| MCP | ACP `session/new`의 `mcpServers`, `.perdix/config.json`, `.mcp.json`, `.codex/config.toml [mcp_servers]`, 전역(`~/.perdix`, `~/.claude.json`) | 우선순위: ACP > `.perdix` > `.mcp.json` > `.codex` > 전역. 동일 이름은 상위가 덮어쓴다 (구현된 범위: stdio·tools, ACP > `.mcp.json`(신뢰 시) > `~/.perdix/mcp.json`. [ADR 0034](adr/0034-mcp-client.md), [MCP 사용법](mcp.md)) |
 
 자체 설정은 `.perdix/config.json`(프로젝트) / `~/.perdix/config.json`(전역). AGENTS.md와 CLAUDE.md가 둘 다 있으면 둘 다 읽되 중복 문단은 제거하지 않는다(사용자 책임).
 
@@ -259,7 +259,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 
 | 역할 | 기본 모델 | effort | 근거 |
 |---|---|---|---|
-| `main` (chat/build) | `claude-opus-5-5` | `xhigh` | 장기 자율 작업과 도구 사용의 품질이 비용보다 중요. 코딩 에이전트 권장 effort |
+| `main` (general/build) | `claude-opus-5-5` | `xhigh` | 장기 자율 작업과 도구 사용의 품질이 비용보다 중요. 코딩 에이전트 권장 effort |
 | `main` (plan 모드) | `claude-opus-5-5` | `max` | 계획 품질이 이후 전체 비용을 좌우 |
 | `executor` | `claude-opus-5-5` | `high` | 부모가 쪼개 준 과업이라 main보다 한 단계 낮춰 토큰 절약 |
 | `explore` | `claude-haiku-4-5` | (미지원) | 읽기 전용 탐색·요약. 양이 많고 판단은 얕음 |
@@ -274,7 +274,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
 
 | 역할 | 기본 모델 | effort | 근거 |
 |---|---|---|---|
-| `main` (chat/build) | `gpt-6.1-sol` ($2/$10) | `xhigh` | Opus 5.5와 같은 가격대의 일상 플래그십. 1.05M 컨텍스트 |
+| `main` (general/build) | `gpt-6.1-sol` ($2/$10) | `xhigh` | Opus 5.5와 같은 가격대의 일상 플래그십. 1.05M 컨텍스트 |
 | `main` (plan 모드) | `gpt-6-astra` ($10/$50) | `max` | 최상위 모델. 계획 단계만 쓰므로 비용 영향이 작다 |
 | `executor` | `gpt-6.1-sol` | `high` | main과 동일 모델로 스타일 일관성 유지 |
 | `explore` | `gpt-6-luna` ($0.10/$0.50) | `low` | 경량. effort `none`도 지원하지만 요약 품질 때문에 low |
@@ -316,7 +316,7 @@ OpenCode 방식의 3단계: `allow | ask | deny`. 규칙은 도구 + 패턴 단�
     "strong":  { "provider": "anthropic", "model": "claude-opus-5-5" },
     "mid":     { "provider": "anthropic", "model": "claude-sonnet-5-5" },
     "cheap":   { "provider": "anthropic", "model": "claude-haiku-4-5" },
-    "local":   { "provider": "openai_compat", "base_url": "http://localhost:11434/v1", "model": "qwen3" } },
+    "local":   { "provider": "ollama", "model": "qwen3:4b" } },
   "agents": {
     "main":      { "model": "strong", "effort": "xhigh", "plan_model": "strong", "plan_effort": "max" },
     "executor":  { "model": "strong", "effort": "high" },

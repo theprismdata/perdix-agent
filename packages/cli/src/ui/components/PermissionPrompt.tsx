@@ -66,7 +66,7 @@ export function PermissionPrompt({ request, onAnswer }: PermissionPromptProps) {
         {request.title}
       </Text>
       {options.map((opt, i) => {
-        const shortcut = KIND_TO_KEY[opt.kind];
+        const shortcut = opt.optionId === "yolo" ? undefined : KIND_TO_KEY[opt.kind];
         const active = i === selected;
         return (
           <Text key={opt.optionId} color={active ? theme.accent : undefined}>

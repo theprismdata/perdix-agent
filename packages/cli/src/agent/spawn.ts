@@ -25,6 +25,8 @@ export interface ResolveOptions {
   moduleDir?: string;
   /** 독립 실행 바이너리 위치. */
   executableDir?: string;
+  /** 찾을 실행 파일 이름. 기본 "perdix-server" (게이트웨이 등 다른 바이너리를 찾을 때 지정) */
+  binaryName?: string;
 }
 
 /** 공백 구분 명령 문자열을 실행 파일과 인자로 나눈다. */
@@ -77,9 +79,10 @@ export function resolveServerCommand(opts: ResolveOptions = {}): ServerCommand {
   if (fromEnv && fromEnv.trim()) {
     return { ...splitCommand(fromEnv), source: "env" };
   }
-  const nativeServer = join(opts.executableDir ?? dirname(realpathSync(process.execPath)), "server", process.platform === "win32" ? "perdix-server.exe" : "perdix-server");
+  const binaryName = opts.binaryName ?? "perdix-server";
+  const nativeServer = join(opts.executableDir ?? dirname(realpathSync(process.execPath)), "server", process.platform === "win32" ? `${binaryName}.exe` : binaryName);
   if (existsSync(nativeServer)) return { command: nativeServer, args: [], source: "bundled" };
-  const onPath = findOnPath("perdix-server", env);
+  const onPath = findOnPath(binaryName, env);
   if (onPath) return { command: onPath, args: [], source: "path" };
 
   const moduleDir = opts.moduleDir ?? dirname(fileURLToPath(import.meta.url));
@@ -89,7 +92,7 @@ export function resolveServerCommand(opts: ResolveOptions = {}): ServerCommand {
     if (!uv) throw new Error("Bundled perdix server requires uv. Install uv and add it to PATH.");
     return {
       command: uv,
-      args: ["run", "--locked", "--no-dev", "--project", bundledServer, "perdix-server"],
+      args: ["run", "--locked", "--no-dev", "--project", bundledServer, binaryName],
       source: "bundled",
     };
   }
@@ -97,12 +100,12 @@ export function resolveServerCommand(opts: ResolveOptions = {}): ServerCommand {
   if (repo) {
     return {
       command: "uv",
-      args: ["run", "--project", join(repo, "server"), "perdix-server"],
+      args: ["run", "--project", join(repo, "server"), binaryName],
       source: "dev",
     };
   }
   throw new Error(
-    "perdix-server not found. Install it (`uv tool install perdix`), set PERDIX_SERVER, or pass --server <cmd>.",
+    `${binaryName} not found. Install it (\`uv tool install perdix\`), set PERDIX_SERVER, or pass --server <cmd>.`,
   );
 }
 

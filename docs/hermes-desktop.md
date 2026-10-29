@@ -1,0 +1,76 @@
+# Hermes Desktop으로 Perdix 쓰기
+
+설계: [ADR 0036](adr/0036-hermes-desktop-compat-server.md). Hermes Desktop 앱은 수정하지 않는다.
+
+## 1. Perdix 호환 서버
+
+```bash
+export PERDIX_HERMES_DESKTOP_PORT=18795
+export PERDIX_HERMES_DESKTOP_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+perdix --hermes-desktop --provider openrouter --model openai/gpt-6-luna
+```
+
+서버는 `127.0.0.1:18795`에서 `/api/health`, `/api/status`(공개)와 토큰이 필요한 REST,
+`/api/ws`를 제공한다. `--debug`를 주면 요청·JSON-RPC 흐름을 stderr에 기록한다.
+
+## 2. Hermes Desktop 연결
+
+Hermes Desktop을 소스에서 빌드한다(`apps/desktop`에서 `npm install`, `npm run build`).
+원격 모드 환경변수로 실행하면 로컬 Hermes 백엔드 대신 Perdix에 접속한다.
+
+```bash
+export HERMES_DESKTOP_REMOTE_URL=http://127.0.0.1:18795
+export HERMES_DESKTOP_REMOTE_TOKEN="<위와 같은 토큰>"
+export HERMES_HOME="$HOME/.perdix/hermes-desktop/home"   # 기존 ~/.hermes를 건드리지 않게 분리
+cd apps/desktop && ./node_modules/.bin/electron --user-data-dir="$HOME/.perdix/hermes-desktop/userdata" .
+```
+
+사용하는 공급자의 키는 `~/.perdix/credentials.json` 또는 `perdix auth`로 등록한다. Perdix CLI는
+하위 프로세스 env에서 비밀을 정리하므로 환경변수 키는 서버에 전달되지 않는다.
+
+## Langflow 플로우 쓰기
+
+서버를 `--langflow-config <파일>`(형식은 [docs/langflow.md](langflow.md))로 실행한다.
+
+| 방법 | 사용 |
+|---|---|
+| 직접 실행 | 대화창에 `/flows`, `/flow <별칭> <입력>` — 모델·승인 없이 실행하고 결과를 표시 |
+| 모델이 호출 | `/mode build` 후 평소처럼 요청하면 모델이 `langflow_run`을 부르고 승인 카드가 뜬다 |
+| 목록 보기 | Capabilities → Skills의 `Langflow` 분류 |
+
+호출 가능한 플로우는 설정의 허용 목록뿐이다.
+
+## Langflow 편집 화면 열기
+
+서버를 `--langflow-config <파일> --hermes-home <HERMES_HOME>`로 켜면 Hermes 플러그인
+(`<HERMES_HOME>/desktop-plugins/langflow/plugin.js`)이 설치된다. Hermes 앱을 (재)시작하면:
+
+- 왼쪽 사이드바의 `Langflow` 항목(Scheduled jobs 아래)을 누르거나, 대화창에 `/langflow`를 입력(슬래시
+  자동완성 때문에 Enter를 두 번)하면 메인 영역에 Langflow 편집 화면이 열린다.
+- 화면 안에서 플로우 만들기·편집·Playground 실행을 그대로 쓸 수 있다. 로그인 상태는 앱 안에 유지된다.
+- Langflow가 꺼져 있으면 안내 문구와 `다시 확인` 버튼이 보인다.
+
+Langflow는 UI를 포함해 띄워야 한다(`langflow run`, `--backend-only` 제외). 개인용이면
+`LANGFLOW_AUTO_LOGIN=true`가 편하다. GitHub·Discord 표시와 시작 안내가 없는 Perdix 판 화면은
+`packages/langflow-ui/build.sh`로 빌드해 `langflow run --frontend-path ~/.perdix/langflow-ui/build`로 쓴다
+([README](../packages/langflow-ui/README.md)). 화면을 바꾼 뒤에는 이미 열려 있는 Hermes 앱의
+Langflow 페이지가 이전 문서를 붙잡고 있을 수 있으니 Hermes 앱을 다시 시작한다. 플러그인은 Hermes 앱을 수정하지 않는 공식 확장 방식이다.
+
+## 사이드바
+
+플러그인이 `Messaging`, `Artifacts`, `Scheduled jobs`를 숨긴다(Perdix에 없는 기능). 남는 항목은 `New session`,
+`Capabilities`(Skills의 Langflow 플로우, Plugins), `Langflow`다. 다시 보이게 하려면
+`packages/cli/src/hermes/langflow-plugin.ts`의 `hide` 목록에서 빼고 서버를 다시 시작한다.
+
+## Bots 탭 끄기
+
+사이드바의 `BOTS`는 Hermes의 Bot Mode(프로필을 봇 명단으로 보여 주는 기능)이고 Perdix에는 프로필이 없어
+쓸 수 없다. Hermes는 플러그인이 다른 플러그인을 끄지 못하게 설계돼 있어서 사용자가 앱에서 직접 끈다:
+**Capabilities → Plugins → Bots의 Desktop 스위치를 끈다.** 바로 적용되고 앱 데이터(`hermes.desktop.pluginDecisions.v2`)에
+저장돼 재시작해도 유지된다. 앱 데이터 폴더(`--user-data-dir`)를 새로 만들면 다시 꺼야 한다.
+이 화면이 열리도록 호환 서버는 `plugins.manage`의 `list`에 빈 목록으로 답한다(Perdix에는 Hermes식 에이전트
+플러그인이 없다).
+
+## 현재 지원
+
+채팅(스트리밍), 도구 실행 표시, 세션 목록, 모델 선택. 스킬·크론·음성·봇은 비어 있다.

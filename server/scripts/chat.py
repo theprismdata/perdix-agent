@@ -2,12 +2,12 @@
 
 사용:
     uv run python scripts/chat.py                 # Anthropic(ANTHROPIC_API_KEY 필요), build 모드
-    uv run python scripts/chat.py --mode chat --model claude-sonnet-5-5
+    uv run python scripts/chat.py --mode general --model claude-sonnet-5-5
     uv run python scripts/chat.py --fake tests/fixtures/demo.json   # 네트워크 없이 데모
     uv run python scripts/chat.py -- --permission-mode accept-edits
     ('--' 뒤는 서버 인자 그대로 전달)
 
-명령: /mode chat|plan|build, /cancel(실행 중 Ctrl+C), /quit
+명령: /mode general|plan|build, /cancel(실행 중 Ctrl+C), /quit
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--cwd", default=os.getcwd())
-    ap.add_argument("--mode", default="build", choices=["chat", "plan", "build"])
+    ap.add_argument("--mode", default="build", choices=["general", "plan", "build"])
     ap.add_argument("--model", default=None)
     ap.add_argument("--fake", default=None, help="FakeProvider 스크립트 JSON 경로")
     ap.add_argument("--db", default=None)
