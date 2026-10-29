@@ -27,7 +27,7 @@ const COMMANDS = [
   ["/save", "자동 저장과 복원 안내"], ["/loop", "Perdix 목표 루프"],
   ["/memories", "Perdix 메모리"], ["/flows", "Langflow 플로우 목록"],
   ["/flow", "Langflow 플로우 실행: /flow <별칭> <입력>"],
-  ["/langflow", "Langflow 편집 화면 열기(Hermes Desktop 플러그인 필요)"], ["/theme", "auto | light | dark"],
+  ["/theme", "auto | light | dark"],
   ["/redraw", "화면 다시 그리기"], ["/copy", "응답 복사"], ["/quit", "종료"],
   ["/login", "공급자 로그인·API 키 등록"], ["/logout", "공급자 로그아웃"], ["/auth", "status | list | use <제공자> <프로필|legacy>"],
 ] as const;
@@ -507,10 +507,6 @@ export class HermesAdapter {
           await session.handle.setModel(args[0] ?? "");
           this.publish(id, "session.info", this.info(session));
           return { output: `모델 변경: ${session.handle.info.currentModel}` };
-        }
-        if (name === "langflow") {
-          this.publish(id, "perdix.langflow.open", {});
-          return { output: "Langflow 편집 화면을 엽니다. 열리지 않으면 Hermes Desktop에 Langflow 플러그인이 설치돼 있는지 확인하세요(docs/hermes-desktop.md)." };
         }
         if (name === "loop" || name === "memories" || name === "team" || name === "auth" || name === "permissions"
             || name === "flows" || name === "flow") {

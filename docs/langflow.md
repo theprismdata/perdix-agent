@@ -57,3 +57,28 @@ Hermes Desktop 안에서 Langflow 편집 화면(캔버스)을 여는 방법은 [
 ```bash
 ~/.perdix/langflow/run.sh 7861   # 포트가 사용 중이면 시작하지 않는다
 ```
+
+## Perdix 모델을 Langflow에서 쓰기
+
+Perdix에 설정해 둔 모델(`agents.json`의 별칭·역할)을 Langflow의 **OpenAI Compatible** 공급자로 쓸 수 있다.
+Perdix가 OpenAI 호환 API(`/v1/models`, `/v1/chat/completions`, 스트리밍·도구 호출 포함)를 로컬에 열고,
+Langflow는 이 주소를 일반 OpenAI 호환 서버로 본다(Langflow 소스 수정 없음). 결정: [ADR 0038](adr/0038-openai-compatible-model-api.md).
+
+```bash
+export PERDIX_MODELS_TOKEN=$(openssl rand -hex 24)   # 24자 이상. 이 토큰이 곧 모델 사용 권한이다
+perdix-modelapi --port 18793                         # 127.0.0.1 전용
+```
+
+Langflow 전역 변수(설정 → 변수)에 다음 두 개를 만든다.
+
+| 변수 | 종류 | 값 |
+| --- | --- | --- |
+| `OPENAI_COMPATIBLE_BASE_URL` | Generic | `http://127.0.0.1:18793/v1` |
+| `OPENAI_COMPATIBLE_API_KEY` | Credential | 위 토큰 |
+
+그러면 Language Model 컴포넌트에서 `OpenAI Compatible` 공급자를 고르면 `economy`, `balanced`, `role:build` 등이
+목록에 나타난다. Langflow는 기본으로 루프백 주소 접근을 막으므로 `LANGFLOW_SSRF_ALLOWED_HOSTS=127.0.0.1`을
+Langflow 실행 환경에 지정해야 한다(`~/.perdix/langflow/run.sh`가 이미 지정한다).
+
+주의: `temperature`, `top_p`, `tool_choice` 같은 필드는 무시한다. 구독/OAuth 인증 프로필을 쓰는 모델은
+해당 약관의 허용 범위 안에서만 쓸 것.

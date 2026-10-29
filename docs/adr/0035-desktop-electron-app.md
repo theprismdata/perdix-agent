@@ -1,6 +1,10 @@
 # ADR 0035: 데스크톱 네이티브 앱(Electron)
 
-상태: 채택 (구현·동작 확인: feat/langflow-wf)
+상태: 대체됨 ([ADR 0036](0036-hermes-desktop-compat-server.md)) — `packages/desktop` 제거함
+
+ADR 0036의 Hermes Desktop 호환 서버가 실시간 스트리밍 채팅·도구 실행 표시·모델 선택이
+되는 네이티브 GUI를 이미 제공해서, 이 ADR의 게이트웨이 대시보드 전용 Electron 래퍼
+(`packages/desktop`)는 더 쓰지 않는다. 아래 내용은 기록용으로 남긴다.
 
 ## 배경
 

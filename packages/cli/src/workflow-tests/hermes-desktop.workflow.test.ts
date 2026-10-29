@@ -49,9 +49,11 @@ describe("Hermes Desktop 호환 서버", () => {
 
       const installed = join(home, "desktop-plugins", "langflow", "plugin.js");
       expect(readFileSync(installed, "utf8")).toBe(LANGFLOW_PLUGIN_SOURCE);
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("perdix.langflow.open");
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'sidebar.nav'");
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'routes'");
+      // 편집 화면(webview)은 사이드바와 구조가 섞여 어색해서 뺐다 — 실행(/flow)과 목록(Skills)만 API로 남는다.
+      expect(LANGFLOW_PLUGIN_SOURCE).not.toContain("perdix.langflow.open");
+      expect(LANGFLOW_PLUGIN_SOURCE).not.toContain("area: 'sidebar.nav'");
+      expect(LANGFLOW_PLUGIN_SOURCE).not.toContain("area: 'routes'");
+      expect(LANGFLOW_PLUGIN_SOURCE).not.toContain("attachChromeHider");
       expect(LANGFLOW_PLUGIN_SOURCE).not.toMatch(/openWorkspace|statusBar/);
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("area: 'sidebarNav.prefs'");
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("hide: ['messaging', 'artifacts', 'cron']");
@@ -59,8 +61,6 @@ describe("Hermes Desktop 호환 서버", () => {
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("hideSplashWordmark");
       expect(LANGFLOW_PLUGIN_SOURCE).toContain("watchSplash(ctx)");
       expect(LANGFLOW_PLUGIN_SOURCE).not.toContain("PERDIX");
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("get_started_progress_title");
-      expect(LANGFLOW_PLUGIN_SOURCE).toContain("attachChromeHider");
 
       const route = `${server.url}/api/plugins/langflow/config`;
       expect((await fetch(route)).status).toBe(401);
