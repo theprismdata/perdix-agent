@@ -116,7 +116,7 @@ def create_app(
         async def mcp_default(
             request: Request, authorization: str | None = Header(default=None)
         ) -> Any:
-            return await serve_mcp("chat", request, authorization)
+            return await serve_mcp("general", request, authorization)
 
         @app.get("/v1/agents")
         async def list_agents(authorization: str | None = Header(default=None)) -> Any:

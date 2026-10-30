@@ -152,7 +152,7 @@ def call(http: httpx2.AsyncClient, role: str, name: str, arguments: dict[str, An
 async def test_agent_definitions_match_perdix_roles(tmp_path: Any) -> None:
     async with mcp_client(tmp_path) as http:
         roles = (await http.get("/v1/agents")).json()["data"]
-        assert {r["role"] for r in roles} >= {"chat", "plan", "build", "explore", "executor"}
+        assert {r["role"] for r in roles} >= {"general", "plan", "build", "explore", "executor"}
         explore = (await http.get("/v1/agents/explore")).json()
         executor = (await http.get("/v1/agents/executor")).json()
         assert explore["readOnly"] and not executor["readOnly"]
@@ -169,10 +169,10 @@ async def test_agent_definitions_match_perdix_roles(tmp_path: Any) -> None:
 async def test_mcp_tools_follow_role_and_permission_policy(tmp_path: Any) -> None:
     (tmp_path / "a.txt").write_text("hello\n")
     async with mcp_client(tmp_path) as http:
-        assert (await http.post("/mcp/chat", json={}, headers={"authorization": "x"})
+        assert (await http.post("/mcp/general", json={}, headers={"authorization": "x"})
                 ).status_code == 401
         note = {"jsonrpc": "2.0", "method": "notifications/initialized"}
-        assert (await http.post("/mcp/chat", json=note)).status_code == 202
+        assert (await http.post("/mcp/general", json=note)).status_code == 202
         listed = (await http.post("/mcp/explore", json={
             "jsonrpc": "2.0", "id": 1, "method": "tools/list"})).json()["result"]["tools"]
         assert "write" not in {t["name"] for t in listed}
