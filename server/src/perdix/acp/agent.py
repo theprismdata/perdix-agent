@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -95,8 +96,9 @@ from perdix.harness.events import (
 from perdix.harness.goal import GoalRunner
 from perdix.harness.goal_commands import LOOP_HELP, LoopCommands, latest_loop, loop_argument
 from perdix.harness.hooks import HookBus
+from perdix.harness.langflow import LangflowTurnRunner
 from perdix.harness.modes import MODES, Mode
-from perdix.harness.runner import SessionRunner, TurnBusyError
+from perdix.harness.runner import SessionRunner, TurnBusyError, TurnExecutor
 from perdix.harness.turn import TurnResult, TurnRunner, tool_title
 from perdix.harness.verifier import LoopCallbacks
 from perdix.integrations.langflow.client import LangflowClient
@@ -412,9 +414,14 @@ class PerdixAgent:
         for name in attached.auto_allow:
             state.policy.rules[name] = "allow"
 
-    def _make_turn_runner(self, session_id: str) -> TurnRunner:
-        state = self._sessions[session_id]
+    def _make_turn_runner(self, session_id: str) -> TurnExecutor:
         assert self._store is not None
+        if self.config.langflow_url is not None and self.config.langflow_flow is not None:
+            return LangflowTurnRunner(
+                store=self._store, base_url=self.config.langflow_url,
+                flow=self.config.langflow_flow, api_key=os.environ.get("LANGFLOW_API_KEY"),
+            )
+        state = self._sessions[session_id]
         team = self._teams.get(session_id)
         team_tools = [TeamTool(team)] if team is not None else []
         async def switch_mode(mode_id: str) -> None:
@@ -1110,6 +1117,10 @@ class PerdixAgent:
 
         async def ask_permission(req: PermissionRequest) -> PermissionOutcome:
             return await self._ask_permission(session_id, req)
+
+        if argument is not None and self.config.langflow_url is not None:
+            await sink(TextDelta(text="Langflow 백엔드에서는 /loop를 지원하지 않습니다.\n"))
+            return PromptResponse(stop_reason="end_turn")
 
         if argument in ("", "status", "cancel"):
             if argument == "cancel":

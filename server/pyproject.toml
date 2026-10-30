@@ -22,6 +22,7 @@ dependencies = [
 perdix-server = "perdix.__main__:main"
 perdix-gateway = "perdix.gateway.__main__:main"
 perdix-modelapi = "perdix.modelapi.__main__:main"
+perdix-relay = "perdix.relay.__main__:main"
 
 [dependency-groups]
 dev = [
