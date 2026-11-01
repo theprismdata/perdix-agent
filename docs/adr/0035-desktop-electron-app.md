@@ -6,6 +6,13 @@ ADR 0036의 Hermes Desktop 호환 서버가 실시간 스트리밍 채팅·도�
 되는 네이티브 GUI를 이미 제공해서, 이 ADR의 게이트웨이 대시보드 전용 Electron 래퍼
 (`packages/desktop`)는 더 쓰지 않는다. 아래 내용은 기록용으로 남긴다.
 
+2026-11-01: `packages/desktop`을 한 번 더 복원했다가(당시 Hermes Desktop 소스를
+못 구했다고 착각) 다시 제거했다. 실제로는 Hermes Desktop 소스(`apps/desktop`)가
+별도 저장소(`hermes-agent`)에 이미 있었고 정상 동작 중이었다 — 복원 사유 자체가
+틀렸던 것이다. 또한 이 래퍼가 감싸던 게이트웨이 웹 대시보드(`server/src/perdix/gateway/static/`)도
+같은 날 전부 제거돼(웹 접속 기능 폐기 결정), 이제 `packages/desktop`은 감쌀 대상 자체가 없다.
+GUI는 Hermes Desktop(Electron, 외부 저장소) 하나로 고정한다.
+
 ## 배경
 
 ADR 0003은 "UI 코드 두 벌"을 피하려고 VS Code 확장을 터미널 TUI 재사용으로 시작했고,

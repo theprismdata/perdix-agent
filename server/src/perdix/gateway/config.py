@@ -24,12 +24,31 @@ class AcpAgentConfig(BaseModel):
         return "acp:" + hashlib.sha256(self.model_dump_json().encode()).hexdigest()
 
 
+class OntologyConfig(BaseModel):
+    """이 프로젝트의 온톨로지 드라이런에 쓸 MCP 서버와 문서 경로.
+
+    `mcp_server`는 이 프로젝트의 cwd에 대해 `perdix.mcp.config.resolve_servers`가
+    돌려주는 이름 중 하나여야 한다(신뢰 경계는 그 함수가 이미 처리한다).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    mcp_server: str = Field(min_length=1)
+    doc_paths: tuple[Path, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def check_doc_paths(self) -> "OntologyConfig":
+        if any(not path.is_absolute() for path in self.doc_paths):
+            raise ValueError("doc_paths 항목은 절대 경로여야 합니다")
+        return self
+
+
 class ProjectConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     cwd: Path
     trust_project: bool = False
     github_repository: str | None = None
     acp: AcpAgentConfig | None = None
+    ontology: OntologyConfig | None = None
 
     @model_validator(mode="after")
     def check_directory(self) -> "ProjectConfig":

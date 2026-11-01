@@ -3,14 +3,13 @@ import hmac
 import ssl
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
 
 import httpx2
 import truststore
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic.alias_generators import to_camel
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -19,8 +18,10 @@ from perdix.gateway.channels import GatewayChannels, GitHubImport, GitHubWebhook
 from perdix.gateway.config import LOOPBACK_HOSTS, GatewayConfig, GatewaySecrets
 from perdix.gateway.events import GatewayStore, Job, JobEvent
 from perdix.gateway.runtime import GatewayRuntime, SubmitRequest
-
-STATIC = Path(__file__).parent / "static"
+from perdix.mcp.client import McpClient, McpError
+from perdix.mcp.config import resolve_servers
+from perdix.ontology.models import DryRunResult
+from perdix.ontology.pipeline import run_dry_run
 
 
 class ApprovalRequest(BaseModel):
@@ -103,22 +104,6 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         return response
 
-    @app.get("/")
-    async def dashboard() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
-
-    @app.get("/dashboard.css")
-    async def stylesheet() -> FileResponse:
-        return FileResponse(STATIC / "dashboard.css", media_type="text/css")
-
-    @app.get("/favicon.svg")
-    async def favicon() -> FileResponse:
-        return FileResponse(STATIC / "favicon.svg", media_type="image/svg+xml")
-
-    @app.get("/dashboard.js")
-    async def javascript() -> FileResponse:
-        return FileResponse(STATIC / "dashboard.js", media_type="text/javascript")
-
     @app.get("/api/status", dependencies=auth)
     async def status() -> dict[str, object]:
         return {
@@ -182,6 +167,35 @@ def create_app(
         except ValueError as error:
             raise HTTPException(409, str(error)) from None
         return {"accepted": True}
+
+    @app.get("/api/ontology/projects", dependencies=auth)
+    async def ontology_projects() -> list[dict[str, object]]:
+        return [
+            {"name": name, "docPaths": [str(path) for path in project.ontology.doc_paths]}
+            for name, project in config.projects.items()
+            if project.ontology is not None
+        ]
+
+    @app.post("/api/ontology/projects/{name}/dry-run", dependencies=auth)
+    async def ontology_dry_run(name: str) -> DryRunResult:
+        project = config.projects.get(name)
+        if project is None or project.ontology is None:
+            raise HTTPException(404, "온톨로지가 설정된 프로젝트가 아닙니다")
+        servers, warnings = resolve_servers(project.cwd, trust_project=project.trust_project)
+        server_config = servers.get(project.ontology.mcp_server)
+        if server_config is None:
+            detail = f"MCP 서버 '{project.ontology.mcp_server}'를 찾을 수 없습니다"
+            if warnings:
+                detail += " (" + "; ".join(warnings) + ")"
+            raise HTTPException(409, detail)
+        client = McpClient(project.ontology.mcp_server, server_config, project.cwd)
+        try:
+            await client.start()
+            return await run_dry_run(client, list(project.ontology.doc_paths))
+        except McpError as error:
+            raise HTTPException(502, str(error)) from None
+        finally:
+            await client.close()
 
     @app.post("/api/github/import", dependencies=auth, status_code=202)
     async def github_import(request: GitHubImport) -> Job:
