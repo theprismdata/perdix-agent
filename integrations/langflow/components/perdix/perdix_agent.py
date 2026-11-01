@@ -1,8 +1,11 @@
 """Perdix 에이전트 구성(시스템 프롬프트·모델·도구)을 Langflow 노드로 내놓는 컴포넌트 (ADR 0027).
 
-Perdix 중계 서버(`perdix-relay`)의 HTTP 계약만 쓴다. Langflow 내부나 Perdix 내부를 import하지 않는다.
+Perdix 중계 서버(`perdix-relay`)의 HTTP 계약만 쓴다.
+Langflow 내부나 Perdix 내부를 import하지 않는다.
 - `GET  {url}/v1/agents/{role}`  역할 정의(시스템 프롬프트·모델·도구 목록)
-- `POST {url}/v1/chat/completions` 모델 `perdix:role/{role}` (OpenAI 호환, Perdix 인증으로 호출)
+- `POST {url}/v1/chat/completions` 모델 `perdix:role/{role}` (OpenAI 호환, Perdix 인증으로 호출).
+  Model 칸을 고르면 `perdix:<모델>`로 그 모델을 직접 부른다(키는 여전히 Perdix 것).
+- `GET  {url}/v1/models`        Model 칸에 띄울 Perdix 모델 카탈로그
 - `POST {url}/mcp/{role}`        역할이 받는 내장 도구(MCP JSON-RPC)
 세 출력을 표준 Agent 노드의 Instructions / Language Model(Connect other models) / Tools에 연결한다.
 Perdix에서 역할을 바꾸면 이 노드를 다시 실행할 때 그대로 따라온다.
@@ -19,10 +22,16 @@ from lfx.io import DropdownInput, Output, SecretStrInput, StrInput
 from lfx.schema.message import Message
 
 ROLES = [
-    "chat", "plan", "build", "explore", "executor", "reviewer", "debugger",
+    "general", "plan", "build", "explore", "executor", "reviewer", "debugger",
     "security-reviewer", "compactor", "titler",
 ]
 TIMEOUT = 120.0
+
+
+def model_target(role: str, override: Any) -> str:
+    """중계에 보낼 모델 이름. 비어 있으면 역할 할당(agents.json)을, 값이 있으면 그 모델을 쓴다."""
+    chosen = str(override or "").strip()
+    return f"perdix:{chosen}" if chosen else f"perdix:role/{role}"
 
 
 def _secret(value: Any) -> str:
@@ -41,6 +50,12 @@ class PerdixAgentComponent(Component):
             name="role", display_name="Role", options=ROLES, value="explore",
             info="Perdix 에이전트 역할. 프롬프트·모델·도구가 Perdix와 같습니다.",
             combobox=True,
+        ),
+        DropdownInput(
+            name="model_override", display_name="Model", options=[], value="",
+            info="비워 두면 agents.json에서 이 역할에 할당된 모델을 씁니다. "
+                 "고르면 이 노드만 그 모델로 호출합니다(키는 Perdix 것을 씁니다).",
+            combobox=True, refresh_button=True,
         ),
         StrInput(
             name="relay_url", display_name="Perdix Relay URL", value="http://127.0.0.1:18796",
@@ -73,15 +88,32 @@ class PerdixAgentComponent(Component):
         response = httpx.get(f"{self._base()}/v1/agents/{self.role}", headers=self._headers(),
                              timeout=TIMEOUT)
         if response.status_code >= 400:
-            msg = f"Perdix 역할 정의를 가져오지 못했습니다({response.status_code}): {response.text[:200]}"
+            msg = (f"Perdix 역할 정의를 가져오지 못했습니다({response.status_code}): "
+                   f"{response.text[:200]}")
             raise ValueError(msg)
         return response.json()
+
+    def update_build_config(self, build_config: Any, field_value: Any,
+                            field_name: str | None = None) -> Any:
+        """Model 칸 새로고침 때 중계의 모델 목록을 채운다. 중계가 꺼져 있으면 목록을 비운다."""
+        if field_name == "model_override":
+            try:
+                response = httpx.get(f"{self._base()}/v1/models", headers=self._headers(),
+                                     timeout=10.0)
+                response.raise_for_status()
+                models = [m["id"] for m in response.json()["data"]]
+                build_config["model_override"]["options"] = models
+            except (httpx.HTTPError, KeyError, ValueError):
+                build_config["model_override"]["options"] = []
+        return build_config
 
     # ------------------------------------------------------------ 출력
 
     def get_instructions(self) -> Message:
         definition = self._definition()
-        self.status = f"{definition['role']} / {definition['model']}"
+        chosen = str(getattr(self, "model_override", "") or "").strip()
+        model = f"{chosen} (노드에서 지정)" if chosen else definition["model"]
+        self.status = f"{definition['role']} / {model}"
         return Message(text=definition["systemPrompt"])
 
     def get_model(self) -> Any:
@@ -89,7 +121,8 @@ class PerdixAgentComponent(Component):
 
         # `perdix:` 접두사는 langchain이 gpt-5 이상 이름을 Responses API로 보내는 것을 피한다.
         return ChatOpenAI(
-            model=f"perdix:role/{self.role}", base_url=f"{self._base()}/v1",
+            model=model_target(self.role, getattr(self, "model_override", "")),
+            base_url=f"{self._base()}/v1",
             api_key=_secret(self.relay_token), streaming=True, max_retries=2, timeout=TIMEOUT,
         )
 

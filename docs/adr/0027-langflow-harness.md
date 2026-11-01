@@ -35,6 +35,10 @@ LLM 호출과 도구 사용을 대신 처리한다. 127.0.0.1 전용이고 `~/.p
   계약만 써서 역할의 Instructions / Language Model / Tools를 각각 출력한다. 표준 Agent 노드에 연결하면
   Perdix 구성이 그대로 적용되고, 역할을 바꾸면 노드를 다시 실행할 때 따라온다. 소스 수정 없이
   `LANGFLOW_COMPONENTS_PATH`로 로드한다.
+- Perdix Agent 노드의 `Model` 칸(`model_override`)은 기본으로 비어 있고, 이때 모델은 `perdix:role/<역할>`
+  (agents.json 할당)이다. 사용자가 모델을 고르면 그 노드만 `perdix:<모델>`로 호출한다. 키는 어느 쪽이든 중계가
+  Perdix 인증으로 붙인다. 목록은 중계 `GET /v1/models`에서 받는다(Hermes 편집기는 호환 서버가 loopback 중계에만
+  토큰을 붙여 대신 조회한다).
 - 공급자 생성은 `llm/factory.py`로 모아 에이전트와 중계가 공유한다.
 - 검증된 샘플 `perdix-harness-roles`: plan → explore → reviewer 세 역할을 Perdix Agent 노드로 구성해
   Perdix 서버로 실행했다. 중계 로그에서 역할마다 할당된 모델이 호출됐고 `glob`/`grep`/`read` 도구
