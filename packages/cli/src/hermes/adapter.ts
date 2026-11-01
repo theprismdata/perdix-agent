@@ -7,6 +7,7 @@ import type { AgentEvent, PermissionAnswer, PermissionRequest, SessionHandle, Se
 import { VERSION } from "../version.js";
 import type { AuthAction, AuthProvider, HermesAuthResult } from "./auth.js";
 import { absentFeature, mcpServersList, mcpServersStatus, profilesList, projectsTree, runtimeCheck } from "./features.js";
+import { KO_DESKTOP_MESSAGES } from "./locale-ko.js";
 import { approvalOptions, toolResultText, type HermesEvent, type HermesMessage } from "./events.js";
 import { droppedImagePath, MAX_IMAGES, readClipboardImage, readImage, type AttachedImage } from "./images.js";
 
@@ -81,10 +82,30 @@ export class HermesAdapter {
   onEvent: (event: HermesEvent) => void = () => {};
   onRequest: (id: string, method: string, params: Record<string, unknown>) => void = () => {};
 
+  /** 새 대화(와 이어 연 대화)에 줄 모델. 실행 옵션 `--model`로 시작하고, 설정의 Main model로 바꾼다. */
+  private defaultModel: string | undefined;
+
   constructor(
     private connection: HermesConnection,
     private readonly options: HermesAdapterOptions,
-  ) {}
+  ) {
+    this.defaultModel = options.model;
+  }
+
+  /** 설정 화면의 Main model 저장. 이후 만드는 대화부터 이 모델로 시작한다. */
+  setDefaultModel(model: string): void {
+    this.defaultModel = model;
+  }
+
+  /** 이 연결에 살아 있는 세션인지. Perdix 서버가 재시작되면 전에 받은 세션 id는 사라진다. */
+  hasSession(id: string): boolean {
+    return this.sessions.has(id);
+  }
+
+  /** 화면에서 지금 보고 있는 세션. 없으면 undefined. */
+  currentSessionId(): string | undefined {
+    return this.current ?? undefined;
+  }
 
   private session(id: string): LiveSession {
     const session = this.sessions.get(id);
@@ -290,7 +311,7 @@ export class HermesAdapter {
       case "session.active_list": return { sessions: [] };
       case "session.create": {
         if ([...this.sessions.values()].some((session) => session.busy)) throw new HermesRpcError(-32602, "작업을 취소한 뒤 새 세션을 만드세요.");
-        const handle = await this.connection.newSession({ cwd: this.options.cwd, mode: this.options.mode, model: this.options.model });
+        const handle = await this.connection.newSession({ cwd: this.options.cwd, mode: this.options.mode, model: this.defaultModel });
         const session = this.attach(handle, false);
         return { session_id: handle.info.sessionId, stored_session_id: handle.info.sessionId, info: this.info(session) };
       }
@@ -302,7 +323,7 @@ export class HermesAdapter {
         if (!session) {
           session = this.attach(await this.connection.loadSession({ sessionId: id, cwd: this.options.cwd }), true);
           if (this.options.mode) await session.handle.setMode(this.options.mode);
-          if (this.options.model) await session.handle.setModel(this.options.model);
+          if (this.defaultModel) await session.handle.setModel(this.defaultModel);
         }
         this.current = id;
         return { session_id: id, stored_session_id: id, session_key: id, info: this.info(session), messages: session.history, running: false };
@@ -516,6 +537,16 @@ export class HermesAdapter {
           return { type: "send", message: text, display: text };
         }
         throw new HermesRpcError(-32601, "이 Hermes 기능은 Perdix 평가판에 연결되지 않았습니다. /help로 지원 기능을 확인하세요.");
+      }
+      case "i18n.catalog": {
+        // Hermes 데스크톱 언어 팩. 한국어 desktop 화면만 Perdix가 제공하고, 나머지는 빈 팩(내장 번역 사용).
+        const lang = typeof params.lang === "string" ? params.lang : "";
+        const surface = typeof params.surface === "string" ? params.surface : "";
+        // 서버 팩은 문자열만 받으므로(Hermes backend-packs.ts) 배열 문구는 빼고 보낸다. 배열은 플러그인이 등록한다.
+        const messages = lang === "ko" && surface === "desktop"
+          ? Object.fromEntries(Object.entries(KO_DESKTOP_MESSAGES).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+          : {};
+        return { lang, surface, messages };
       }
       case "mcp.servers.list": return mcpServersList();
       case "mcp.servers.status": return mcpServersStatus();

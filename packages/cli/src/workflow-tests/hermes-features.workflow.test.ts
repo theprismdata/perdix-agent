@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { HermesAdapter, type HermesConnection } from "../hermes/adapter.js";
+import { KO_DESKTOP_MESSAGES } from "../hermes/locale-ko.js";
 import {
   absentFeature, mcpServersList, mcpServersStatus, profilesList, projectsTree, runtimeCheck,
 } from "../hermes/features.js";
@@ -72,6 +74,35 @@ describe("Hermes 앱 요청에 대한 Perdix 응답", () => {
     expect(profiles.bot_mode_protocol).toBe(false);
   });
 
+  it("한국어 언어 팩: desktop 화면 요청에만 한국어 문구를 주고, 다른 언어·화면은 빈 팩", async () => {
+    const adapter = new HermesAdapter({} as HermesConnection, { cwd: "/tmp" });
+    const ko = await adapter.request("i18n.catalog", { lang: "ko", surface: "desktop" }) as { lang: string; surface: string; messages: Record<string, string> };
+    expect(ko.lang).toBe("ko");
+    expect(ko.surface).toBe("desktop");
+    expect(ko.messages["settings.sections.model"]).toBe("모델");
+    expect(ko.messages["sidebar.nav.new-session"]).toBe("새 대화");
+    expect(ko.messages["composer.newSessionPlaceholders"]).toBeUndefined(); // 배열은 서버 팩에서 뺀다
+    expect(await adapter.request("i18n.catalog", { lang: "ja", surface: "desktop" })).toEqual({ lang: "ja", surface: "desktop", messages: {} });
+    expect(await adapter.request("i18n.catalog", { lang: "ko", surface: "tui" })).toEqual({ lang: "ko", surface: "tui", messages: {} });
+  });
+
+  it("한국어 언어 팩 문구는 비어 있지 않고, 자리 표시 번호가 올바르다", () => {
+    const entries = Object.entries(KO_DESKTOP_MESSAGES);
+    expect(entries.length).toBeGreaterThan(1500);
+    for (const [key, text] of entries) {
+      if (key === "composer.themeTryPre") continue; // 한국어 어순상 앞 조각이 비는 문구
+      if (Array.isArray(text)) {
+        // 입력창 안내·빈 대화 안내처럼 Hermes가 목록으로 쓰는 문구
+        expect(text.length, key).toBeGreaterThan(0);
+        for (const line of text) expect(String(line).trim(), key).not.toBe("");
+        continue;
+      }
+      expect(String(text).trim(), key).not.toBe("");
+      // Hermes 함수형 문구의 인자는 많아야 셋이다. 그보다 큰 번호는 옮기다 생긴 오타다.
+      for (const match of String(text).matchAll(/\{(\d+)\}/g)) expect(Number(match[1]), key).toBeLessThan(4);
+    }
+  });
+
   it("Perdix에 없는 기능은 오류가 아니라 '없음'으로 답한다", () => {
     expect(absentFeature("ping")).toEqual({ pong: true });
     expect(absentFeature("pet.info")).toEqual({ enabled: false });
@@ -85,7 +116,8 @@ describe("Hermes 앱 요청에 대한 Perdix 응답", () => {
     expect(absentFeature("billing.state")).toEqual({ ok: true, logged_in: false });
     expect(absentFeature("subscription.state")).toEqual({ ok: true, logged_in: false });
     expect(absentFeature("client.capabilities")).toEqual({ server_requests: ["approval"] });
-    expect((absentFeature("i18n.languages") as { languages: Array<{ id: string }> }).languages.map((language) => language.id)).toEqual(["en", "ko"]);
+    // 영어 등은 Hermes 내장. 한국어만 서버 팩으로 알린다(내장으로 알리면 번역 없이 영어가 나온다).
+    expect(absentFeature("i18n.languages")).toEqual({ languages: [{ id: "ko", endonym: "한국어", rtl: false, source: "backend" }] });
     expect(absentFeature("정말.모르는.요청")).toBeUndefined();
   });
 });

@@ -115,3 +115,25 @@ Hermes Desktop 소스 `63d0b94`를 별도 클론에서 빌드(`npm install`, `np
 - Hermes 쪽 버전이 바뀌면 필수 REST가 달라질 수 있다. 계약 테스트는 서버 쪽만 있다.
 - 상주 실행(launchd)과 앱 설치·업데이트 절차는 정하지 않았다.
 - ADR 0035의 Electron 래퍼는 이 결정으로 대체될 가능성이 크다(정리 여부는 별도 결정).
+
+## 추가: Perdix 아이콘 실행 껍데기 (2026-11-01)
+Hermes 앱 파일을 고치지 않는 원칙은 그대로 두고, 앱 폴더 옆에 `apps/perdix` 껍데기를 만들어 Dock·창 아이콘만
+Perdix 것으로 바꾼다(`integrations/hermes-desktop/install-shell.sh`). 껍데기는 Hermes의 `package.json`을 복사하고
+`dist`·`node_modules`를 링크하며 `assets/`만 자기 것을 둔다. Hermes는 개발 실행에서 아이콘을 `앱 폴더/assets`에서,
+그 밖에는 `앱 폴더/dist`만 읽기 때문에 가능하다. 앱 이름과 앱 안 로고는 범위 밖이다.
+
+## 추가: 설정 창 정리 (2026-11-01)
+호환을 끝까지 맞추지도, 포크해서 메뉴를 지우지도 않는 절충안을 택했다. 호환 서버는 Perdix에 대응하는 설정만
+연결하고(`GET /api/config/schema`는 빈 목록, `POST /api/model/set`의 main만 agents.json `general` 할당과 새 대화
+기본 모델로 연결), 연결되지 않는 메뉴는 `perdix-settings` 플러그인이 메뉴 항목의 `data-tour` 표식으로 감춘다.
+`data-tour`는 Hermes 화면 안내 기능의 식별자라 비교적 안정적이지만 공식 확장 지점은 아니다. Hermes가 표식을
+바꾸면 감춤이 풀릴 뿐 기능이 깨지지는 않는다.
+
+## 추가: 한국어 메뉴와 화면 설정 기록 (2026-11-01)
+- Hermes에 없는 한국어는 Perdix 팩(`locale-ko.ts`)으로 더한다. 원격 모드에서 서버 언어 팩 동기화가 늘 돌지는
+  않아서 `perdix-settings` 플러그인이 SDK `registerAppLocale`로 직접 등록한다. 평평한 팩은 배열 문구가 버려지므로
+  트리로 펼쳐 넘긴다. 서버 `i18n.catalog`도 같은 문자열을 준다.
+- Hermes 앱은 언어 같은 화면 설정을 `PUT /api/config`로 저장한다. 호환 서버는 이 기록을
+  `<HERMES_HOME>/perdix-desktop-config.json`에 보관만 한다(`desktop-config.ts`). Perdix 에이전트 설정은 여기 두지 않는다.
+- 실행 껍데기의 `package.json`은 이름을 `perdix-desktop-shell`로 바꾼다. Hermes 저장소의 npm 작업 공간(`apps/*`)과
+  이름이 겹치면 npm 명령이 실패한다.

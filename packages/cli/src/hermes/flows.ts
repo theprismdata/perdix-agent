@@ -14,6 +14,8 @@ const configSchema = z.object({
 
 export interface FlowEntry {
   readonly alias: string;
+  /** 별칭이 가리키는 Langflow 플로우 id. 플로우를 지울 때 끊기는 별칭을 알리는 데 쓴다. */
+  readonly id: string;
   readonly description: string;
 }
 
@@ -28,7 +30,7 @@ export function readLangflowInfo(path: string | undefined, warn: (message: strin
   try {
     const config = configSchema.parse(JSON.parse(readFileSync(path, "utf8")));
     if (!config.enabled) return undefined;
-    const flows = Object.keys(config.flows).map((alias) => ({ alias, description: config.flow_descriptions[alias] ?? "" }));
+    const flows = Object.entries(config.flows).map(([alias, id]) => ({ alias, id, description: config.flow_descriptions[alias] ?? "" }));
     return { baseUrl: config.base_url.replace(/\/+$/, ""), flows };
   } catch (error) {
     warn(`Langflow 설정을 읽지 못했습니다: ${error instanceof Error ? error.message : String(error)}`);

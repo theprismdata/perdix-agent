@@ -39,11 +39,9 @@ const ABSENT: Readonly<Record<string, () => Json>> = {
   "billing.state": () => ({ ok: true, logged_in: false }),
   "subscription.state": () => ({ ok: true, logged_in: false }),
   "client.capabilities": () => ({ server_requests: ["approval"] }),
+  // 영어 등은 Hermes에 내장되어 있다. 한국어는 Hermes에 없어서 서버 팩(i18n.catalog, locale-ko.ts)으로 준다.
   "i18n.languages": () => ({
-    languages: [
-      { id: "en", endonym: "English", rtl: false, source: "builtin" },
-      { id: "ko", endonym: "한국어", rtl: false, source: "builtin" },
-    ],
+    languages: [{ id: "ko", endonym: "한국어", rtl: false, source: "backend" }],
   }),
 };
 

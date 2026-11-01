@@ -25,8 +25,49 @@ export HERMES_HOME="$HOME/.perdix/hermes-desktop/home"   # 기존 ~/.hermes를 �
 cd apps/desktop && ./node_modules/.bin/electron --user-data-dir="$HOME/.perdix/hermes-desktop/userdata" .
 ```
 
+Dock 아이콘을 Perdix 것으로 띄우려면 [integrations/hermes-desktop](../integrations/hermes-desktop/README.md)의
+실행 껍데기를 만들고 `apps/desktop` 대신 `apps/perdix`에서 실행한다. Hermes 파일은 고치지 않는다.
+
 사용하는 공급자의 키는 `~/.perdix/credentials.json` 또는 `perdix auth`로 등록한다. Perdix CLI는
 하위 프로세스 env에서 비밀을 정리하므로 환경변수 키는 서버에 전달되지 않는다.
+
+## 설정 창
+
+Hermes 설정 메뉴 중 Perdix에 연결되는 것만 남기고 나머지는 `perdix-settings` 플러그인이 감춘다
+(`packages/cli/src/hermes/settings-plugin.ts`). Hermes 파일은 고치지 않고, 메뉴 항목의 `data-tour` 표식에
+스타일 규칙을 건다.
+
+| 남는 메뉴 | 동작 |
+| --- | --- |
+| Model › Main model | 새 대화의 기본 모델. 저장하면 agents.json의 `general` 역할 할당과 이 연결의 새 대화 기본값, 지금 보는 대화의 모델이 바뀐다. OpenRouter 모델만 저장된다 |
+| Appearance (Pet 제외) | 테마·글꼴·창 배치. 앱 안에서만 처리한다 |
+| Notifications | 데스크톱 알림·소리 |
+| Gateways (Remote updates 제외) | 이 앱이 붙는 서버 연결 |
+| Keyboard Shortcuts | 단축키 |
+| Plugins | 플러그인 설정 페이지 |
+
+감춘 메뉴: Chat, Workspace, Safety, Browser, Passwords & Logins, Memory & Context, Voice, Advanced, Billing,
+Providers, Tools & Keys, Sessions, About, 그리고 Model의 Fallback·Auxiliary·Mixture of Agents. 모두 Hermes 설정
+파일이나 Nous 서비스에 기대는 화면이라 Perdix에서는 열어도 실패하거나 저장되지 않는다.
+
+### 한국어 메뉴
+
+Hermes에는 한국어 번역이 없어서 Perdix가 한국어 팩(`packages/cli/src/hermes/locale-ko.ts`, 약 2,000문구)을 넣는다.
+설정 → 모양 → 일반 → **언어**에서 "한국어"를 고르면 적용되고, 고른 언어는 `<HERMES_HOME>/perdix-desktop-config.json`에
+저장돼 다시 열어도 유지된다.
+
+- 팩은 `perdix-settings` 플러그인이 시작할 때 Hermes SDK(`ctx.i18n.registerAppLocale`)로 등록한다. 서버의
+  `i18n.catalog`도 같은 문구(문자열만)를 돌려주지만, 원격 모드에서는 Hermes가 이 요청을 보내지 않을 때가 있다.
+- 번역 범위는 화면에 보이는 영역(사이드바, 입력창, 대화 화면, 상태 표시, 단축키, 알림, 남긴 설정 메뉴)이다.
+  나머지는 영어로 남는다. 앱·에이전트를 가리키는 "Hermes"는 "Perdix"로 옮겼다.
+- 탭 이름 "NEW SESSION"은 Hermes 코드의 상수라 바뀌지 않는다. 입력창 안내 문구는 앱을 연 직후 첫 화면에서만
+  영어로 나오고, 다른 대화로 옮기면 한국어가 된다(입력창이 팩 등록보다 먼저 문구를 고르기 때문).
+
+주의:
+- `general` 역할은 Langflow 중계의 general 역할(샘플 플로우)도 같이 쓴다. Main model을 바꾸면 그쪽도 바뀐다.
+- 서버를 `--model`로 띄우면 다시 띄울 때 새 대화 기본값이 그 값으로 돌아간다. agents.json 할당만 계속 쓰려면
+  `--model` 없이 띄운다.
+- 설정 창은 마지막으로 연 화면을 기억한다. 감춘 화면을 열어 둔 채였다면 다른 메뉴를 한 번 누르면 된다.
 
 ## Langflow 플로우 쓰기
 
@@ -39,6 +80,11 @@ cd apps/desktop && ./node_modules/.bin/electron --user-data-dir="$HOME/.perdix/h
 | 목록 보기 | Capabilities → Skills의 `Langflow` 분류 |
 
 호출 가능한 플로우는 설정의 허용 목록뿐이다.
+
+## Workflow 편집기 (Hermes 안에서 플로우 만들기)
+
+`--hermes-home`으로 켜면 사이드바에 `Workflow` 항목이 생긴다. 팔레트에서 노드를 넣고 끌어서 잇고 저장하면
+Langflow에 반영된다. 만드는 순서, 역할 고르기, `/flow` 별칭 등록, 문제 해결은 [docs/hermes-workflow.md](hermes-workflow.md)에 있다.
 
 ## Langflow 편집 화면 열기
 
