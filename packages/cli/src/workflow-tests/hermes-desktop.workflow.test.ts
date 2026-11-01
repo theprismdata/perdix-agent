@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { HermesAdapter } from "../hermes/adapter.js";
 import { LANGFLOW_PLUGIN_SOURCE } from "../hermes/langflow-plugin.js";
+import { WORKFLOW_PLUGIN_SOURCE } from "../hermes/workflow-plugin.js";
 import { startHermesDesktopServer, type HermesDesktopServer } from "../hermes/desktop-server.js";
 
 type Call = { method: string; params: Record<string, unknown> };
@@ -81,9 +82,38 @@ describe("Hermes Desktop 호환 서버", () => {
     try {
       const home = join(directory, "home");
       server = await startHermesDesktopServer(fakeAdapter([]), { token: "t".repeat(32), hermesHome: home });
-      expect(existsSync(join(home, "desktop-plugins"))).toBe(false);
+      // Workflow 플러그인은 hermesHome만 있어도 설치되므로(별도 테스트) desktop-plugins 자체는 생긴다 —
+      // 여기서 보는 건 Langflow 설정이 없을 때 langflow 서브디렉터리가 안 생기는지다.
+      expect(existsSync(join(home, "desktop-plugins", "langflow"))).toBe(false);
       const body = await (await fetch(`${server.url}/api/plugins/langflow/config`, { headers: auth(server.token) })).json();
       expect(body).toEqual({ url: null, ready: false });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("Workflow 플러그인: hermesHome만 있으면 설치하고, 역할 목록과 꺼진 Langflow 주소를 돌려준다", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "perdix-workflow-"));
+    try {
+      const home = join(directory, "home");
+      server = await startHermesDesktopServer(fakeAdapter([]), { token: "t".repeat(32), hermesHome: home });
+
+      const installed = join(home, "desktop-plugins", "workflow", "plugin.js");
+      expect(readFileSync(installed, "utf8")).toBe(WORKFLOW_PLUGIN_SOURCE);
+      expect(WORKFLOW_PLUGIN_SOURCE).toContain("area: 'sidebar.nav'");
+      expect(WORKFLOW_PLUGIN_SOURCE).toContain("area: 'routes'");
+      // 공식 SDK 밖의 window-open 경로는 Hermes가 무조건 거부한다 — 안 씀.
+      expect(WORKFLOW_PLUGIN_SOURCE).not.toContain("window.hermesDesktop");
+      expect(WORKFLOW_PLUGIN_SOURCE).not.toContain('target="_blank"');
+      expect(WORKFLOW_PLUGIN_SOURCE).not.toContain("window.open");
+
+      const headers = auth(server.token);
+      const roles = await (await fetch(`${server.url}/api/plugins/workflow/roles`, { headers })).json() as Array<Record<string, unknown>>;
+      expect(roles).toHaveLength(10);
+      expect(roles[0]).toMatchObject({ id: "general", readOnly: true });
+
+      const langflow = await (await fetch(`${server.url}/api/plugins/workflow/langflow-url`, { headers })).json();
+      expect(langflow).toEqual({ url: null, ready: false });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

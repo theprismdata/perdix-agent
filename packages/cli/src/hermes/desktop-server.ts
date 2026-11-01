@@ -16,6 +16,7 @@ import { PERDIX_HERO, PERDIX_LOGO } from "./branding.js";
 import { VERSION } from "../version.js";
 import { readFlowCatalog, readLangflowInfo, type FlowEntry } from "./flows.js";
 import { LANGFLOW_PLUGIN_ID, LANGFLOW_PLUGIN_SOURCE } from "./langflow-plugin.js";
+import { WORKFLOW_PLUGIN_ID, WORKFLOW_PLUGIN_SOURCE } from "./workflow-plugin.js";
 
 export interface HermesDesktopServer {
   readonly url: string;
@@ -121,6 +122,23 @@ const profile = (cwd: string, model: string): Json => ({
   name: "default", is_default: true, has_env: false, model, provider: "perdix", path: cwd, skill_count: 0,
 });
 
+interface RoleInfo { readonly id: string; readonly description: string; readonly readOnly: boolean }
+// server/src/perdix/harness/modes.py의 MODES와 server/src/perdix/subagents/presets.py의 PRESETS를
+// 손으로 옮겨 적은 것이다 — 실시간 동기화가 아니다. 두 파일이 바뀌면 이 목록도 같이 바꿔야 한다.
+// TODO: _perdix 확장 ACP 메서드로 실시간 조회하게 바꾸기(지금은 없음, docs/protocol.md §1.2 참고).
+const ROLES: readonly RoleInfo[] = [
+  { id: "general", description: "질문에 답하고 코드베이스를 탐색한다.", readOnly: true },
+  { id: "plan", description: "파일을 고치지 않고 조사해서 계획만 제안한다.", readOnly: true },
+  { id: "build", description: "읽기·수정·명령 실행으로 구현하고 검증한다.", readOnly: false },
+  { id: "explore", description: "읽기 전용 탐색/요약. 양이 많고 판단은 얕다.", readOnly: true },
+  { id: "executor", description: "부모가 쪼개준 과업 실행. 쓰기 가능, main보다 한 단계 낮은 effort.", readOnly: false },
+  { id: "reviewer", description: "완료 조건 판정. 읽기 전용, 검증 게이트용.", readOnly: true },
+  { id: "compactor", description: "히스토리 요약 전용, 빈번 호출.", readOnly: true },
+  { id: "titler", description: "세션 제목 등 단발 저비용 잡무.", readOnly: true },
+  { id: "debugger", description: "실패 원인 분석. 재현에 필요하면 쓰기·실행 도구도 쓸 수 있다.", readOnly: false },
+  { id: "security-reviewer", description: "취약점·신뢰 경계 점검. 읽기 전용, 코드 리뷰 관점의 보안 검토.", readOnly: true },
+];
+
 const ROUTES: Record<string, Route> = {
   "GET /api/health": health,
   "GET /api/status": status,
@@ -145,6 +163,8 @@ const ROUTES: Record<string, Route> = {
   // Langflow 플로우를 Hermes의 스킬 목록에 보여준다. 실행은 `/flow <별칭> <입력>`이다.
   // 플러그인(Langflow 화면 탭)이 주소를 묻는 곳. 실제로 떠 있는지도 알려 준다.
   "GET /api/plugins/langflow/config": (ctx) => ctx.langflowUi(),
+  "GET /api/plugins/workflow/roles": () => [...ROLES],
+  "GET /api/plugins/workflow/langflow-url": (ctx) => ctx.langflowUi(),
   "GET /api/skills": (ctx) => ctx.flows().map((flow) => ({
     name: flow.alias, category: "Langflow", enabled: true, provenance: "external",
     description: `${flow.description || "Langflow 플로우"} — /flow ${flow.alias} <입력>`,
@@ -184,6 +204,12 @@ export async function startHermesDesktopServer(
     mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, "plugin.js"), LANGFLOW_PLUGIN_SOURCE);
     log(`Langflow 플러그인을 설치했습니다: ${directory}`);
+  }
+  if (options.hermesHome !== undefined) {
+    const directory = join(options.hermesHome, "desktop-plugins", WORKFLOW_PLUGIN_ID);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "plugin.js"), WORKFLOW_PLUGIN_SOURCE);
+    log(`Workflow 플러그인을 설치했습니다: ${directory}`);
   }
   const hub = new HermesSocketHub(adapter, () => ({
     change_events: true, heartbeat: true, replay_epoch: 1,
