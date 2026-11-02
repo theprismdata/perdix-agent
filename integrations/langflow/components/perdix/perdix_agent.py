@@ -9,6 +9,8 @@ Langflow 내부나 Perdix 내부를 import하지 않는다.
 - `POST {url}/mcp/{role}`        역할이 받는 내장 도구(MCP JSON-RPC)
 세 출력을 표준 Agent 노드의 Instructions / Language Model(Connect other models) / Tools에 연결한다.
 Perdix에서 역할을 바꾸면 이 노드를 다시 실행할 때 그대로 따라온다.
+Instructions 칸(`instructions_override`)에 글을 쓰면 그 노드는 원본 대신 그 글을 지시문으로 낸다.
+값은 플로우에 저장되므로 원본(Perdix 시스템 프롬프트)은 바뀌지 않고 그 워크플로에서만 쓰인다.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from typing import Any
 import httpx
 from langchain_core.tools import StructuredTool, ToolException
 from lfx.custom.custom_component.component import Component
-from lfx.io import DropdownInput, Output, SecretStrInput, StrInput
+from lfx.io import DropdownInput, MultilineInput, Output, SecretStrInput, StrInput
 from lfx.schema.message import Message
 
 ROLES = [
@@ -32,6 +34,12 @@ def model_target(role: str, override: Any) -> str:
     """중계에 보낼 모델 이름. 비어 있으면 역할 할당(agents.json)을, 값이 있으면 그 모델을 쓴다."""
     chosen = str(override or "").strip()
     return f"perdix:{chosen}" if chosen else f"perdix:role/{role}"
+
+
+def chosen_instructions(override: Any) -> str | None:
+    """워크플로 전용 지시문. 비어 있으면 None(역할 원본을 쓴다)."""
+    text = str(override or "")
+    return text if text.strip() else None
 
 
 def _secret(value: Any) -> str:
@@ -56,6 +64,13 @@ class PerdixAgentComponent(Component):
             info="비워 두면 agents.json에서 이 역할에 할당된 모델을 씁니다. "
                  "고르면 이 노드만 그 모델로 호출합니다(키는 Perdix 것을 씁니다).",
             combobox=True, refresh_button=True,
+        ),
+        # input_types=[]: 다른 노드에서 잇는 포트가 아니라 직접 쓰는 칸이다.
+        MultilineInput(
+            name="instructions_override", display_name="Instructions (이 워크플로 전용)",
+            value="", input_types=[],
+            info="비워 두면 Perdix 역할의 시스템 프롬프트를 그대로 씁니다. "
+                 "쓰면 이 노드만 원본 대신 이 글을 지시문으로 냅니다(원본은 바뀌지 않습니다).",
         ),
         StrInput(
             name="relay_url", display_name="Perdix Relay URL", value="http://127.0.0.1:18796",
@@ -113,8 +128,10 @@ class PerdixAgentComponent(Component):
         definition = self._definition()
         chosen = str(getattr(self, "model_override", "") or "").strip()
         model = f"{chosen} (노드에서 지정)" if chosen else definition["model"]
-        self.status = f"{definition['role']} / {model}"
-        return Message(text=definition["systemPrompt"])
+        custom = chosen_instructions(getattr(self, "instructions_override", ""))
+        source = " / 워크플로 전용 지시문" if custom is not None else ""
+        self.status = f"{definition['role']} / {model}{source}"
+        return Message(text=custom if custom is not None else definition["systemPrompt"])
 
     def get_model(self) -> Any:
         from langchain_openai import ChatOpenAI

@@ -15,7 +15,7 @@ import { HermesSocketHub } from "./bridge.js";
 import { PERDIX_HERO, PERDIX_LOGO } from "./branding.js";
 import { VERSION } from "../version.js";
 import { readFlowCatalog, readLangflowInfo, type FlowEntry } from "./flows.js";
-import { listRelayModels, RelayRequestError } from "./relay-client.js";
+import { getRelayRolePrompt, listRelayModels, RelayRequestError } from "./relay-client.js";
 import { DesktopConfigStore } from "./desktop-config.js";
 import {
   LangflowApiError, type FlowData, type LangflowConfig, createFlow, deleteFlow, getFlow, listComponents, listFlows,
@@ -300,6 +300,18 @@ const ROUTES: Record<string, Route> = {
     if (!url) return { ok: false, error: "missing_url" };
     try {
       return { ok: true, result: await listRelayModels(url, ctx.relayTokenFile) };
+    } catch (error) {
+      if (error instanceof RelayRequestError) return { ok: false, error: "relay_failed", detail: error.message };
+      throw error;
+    }
+  },
+  // Perdix Agent 노드의 Instructions 칸에 보여 줄 역할의 원본 시스템 프롬프트를 읽는다.
+  "GET /api/plugins/workflow/relay/prompt": async (ctx) => {
+    const url = ctx.url.searchParams.get("url");
+    const role = ctx.url.searchParams.get("role");
+    if (!url || !role) return { ok: false, error: "missing_url" };
+    try {
+      return { ok: true, result: await getRelayRolePrompt(url, role, ctx.relayTokenFile) };
     } catch (error) {
       if (error instanceof RelayRequestError) return { ok: false, error: "relay_failed", detail: error.message };
       throw error;

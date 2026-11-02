@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import type { HermesAdapter } from "../hermes/adapter.js";
 import { LANGFLOW_PLUGIN_SOURCE } from "../hermes/langflow-plugin.js";
-import { WORKFLOW_PLUGIN_SOURCE } from "../hermes/workflow-plugin.js";
+import { upgradePerdixNodes, WORKFLOW_PLUGIN_SOURCE } from "../hermes/workflow-plugin.js";
 import { HIDDEN_SETTINGS_GROUPS, SETTINGS_PLUGIN_SOURCE, hiddenSettingsCss, toMessageTree } from "../hermes/settings-plugin.js";
 import { startHermesDesktopServer, type HermesDesktopServer } from "../hermes/desktop-server.js";
 
@@ -285,6 +285,116 @@ describe("Hermes Desktop 호환 서버", () => {
       relay.closeAllConnections();
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it("Workflow 노드 에디터: Instructions 칸의 원본 표시는 loopback 중계에서 역할 시스템 프롬프트를 받아 온다", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "perdix-relay-prompt-"));
+    const seen: Array<{ url: string; auth: string | undefined }> = [];
+    const relay = createServer((req, res) => {
+      seen.push({ url: req.url ?? "", auth: req.headers.authorization });
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/v1/agents/build") {
+        res.end(JSON.stringify({ role: "build", model: "m", systemPrompt: "You are Perdix.\nMode: build", tools: [] }));
+      } else {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: "unknown role" }));
+      }
+    });
+    await new Promise<void>((resolve) => relay.listen(0, "127.0.0.1", resolve));
+    const port = (relay.address() as { port: number }).port;
+    try {
+      const tokenFile = join(directory, "relay-token");
+      writeFileSync(tokenFile, "relay-secret\n");
+      server = await startHermesDesktopServer(fakeAdapter([]), { token: "t".repeat(32), relayTokenFile: tokenFile });
+      const headers = auth(server.token);
+      const relayUrl = encodeURIComponent(`http://127.0.0.1:${port}`);
+      const get = async (query: string) =>
+        (await fetch(`${server!.url}/api/plugins/workflow/relay/prompt${query}`, { headers })).json();
+
+      expect(await get(`?url=${relayUrl}&role=build`)).toEqual({ ok: true, result: "You are Perdix.\nMode: build" });
+      expect(seen).toEqual([{ url: "/v1/agents/build", auth: "Bearer relay-secret" }]);
+
+      expect(await get(`?url=${relayUrl}`)).toEqual({ ok: false, error: "missing_url" });
+      expect(await get(`?url=${relayUrl}&role=nope`)).toMatchObject({ ok: false, error: "relay_failed" });
+      // 역할 이름으로 다른 경로를 만들지 못한다.
+      expect(await get(`?url=${relayUrl}&role=${encodeURIComponent("../models")}`)).toMatchObject({ ok: false, error: "relay_failed" });
+      expect(await get(`?url=${encodeURIComponent("http://example.com:18797")}&role=build`)).toMatchObject({ ok: false, error: "relay_failed" });
+      expect(seen).toHaveLength(2);
+    } finally {
+      relay.closeAllConnections();
+      await new Promise<void>((resolve) => relay.close(() => resolve()));
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("Workflow 노드 에디터: Perdix Agent Instructions 칸은 원본을 보여 주고 고치면 전용 값이 된다", () => {
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("key === 'instructions_override'");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("'/relay/prompt?url='");
+    // 비어 있으면 원본을 보여 주고, 원본과 같게 되돌리면 값을 비운다.
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("const shown = custom ? value : (original || '')");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("text === original ? '' : text");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("원본으로 되돌리기");
+  });
+
+  it("Workflow 노드 에디터: 예전 Perdix Agent 노드는 값과 id를 지킨 채 최신 컴포넌트로 바꾼다", () => {
+    const type = "ext:perdix:PerdixAgentComponent@extra";
+    const latest = {
+      template: {
+        _type: { value: "Component" }, code: { value: "NEW CODE" }, role: { value: "explore" },
+        model_override: { value: "" }, instructions_override: { value: "", input_types: [] },
+      },
+      outputs: [{ name: "instructions" }],
+    };
+    const components = { perdix: { [type]: latest }, input_output: { ChatInput: { template: { code: { value: "x" } } } } };
+    const oldNode = {
+      id: "PerdixAgent-a", type: "genericNode", position: { x: 1, y: 2 },
+      data: { id: "PerdixAgent-a", type, node: { template: {
+        _type: { value: "Component" }, code: { value: "OLD CODE" }, role: { value: "build" },
+        model_override: { value: "openai/gpt-6-luna" }, removed_field: { value: "gone" },
+      } } },
+    };
+    const current = { id: "PerdixAgent-b", data: { id: "PerdixAgent-b", type, node: JSON.parse(JSON.stringify(latest)) as typeof latest } };
+    const chat = { id: "ChatInput-c", data: { type: "ChatInput", node: { template: { code: { value: "old chat" } } } } };
+    const flow = { nodes: [oldNode, current, chat], edges: [{ source: "PerdixAgent-a" }] };
+
+    const { data, count } = upgradePerdixNodes(flow, components);
+    expect(count).toBe(1);
+    const upgraded = data.nodes[0] as typeof oldNode & { data: { node: typeof latest } };
+    expect(upgraded.id).toBe("PerdixAgent-a");
+    expect(upgraded.position).toEqual({ x: 1, y: 2 });
+    expect(upgraded.data.node.template.code.value).toBe("NEW CODE");
+    expect(upgraded.data.node.template.role.value).toBe("build");
+    expect(upgraded.data.node.template.model_override.value).toBe("openai/gpt-6-luna");
+    expect(upgraded.data.node.template.instructions_override).toEqual({ value: "", input_types: [] });
+    expect(upgraded.data.node.template).not.toHaveProperty("removed_field");
+    // 이미 최신인 노드와 Perdix가 아닌 노드는 그대로 두고, 원본 객체는 바꾸지 않는다.
+    expect(data.nodes[1]).toBe(current);
+    expect(data.nodes[2]).toBe(chat);
+    expect(data.edges).toBe(flow.edges);
+    expect(oldNode.data.node.template.code.value).toBe("OLD CODE");
+    // 바꿀 것이 없으면 같은 객체를 돌려준다(편집기 effect가 다시 돌지 않게).
+    const again = upgradePerdixNodes(data, components);
+    expect(again).toEqual({ data, count: 0 });
+    expect(again.data).toBe(data);
+    expect(upgradePerdixNodes(flow, null).count).toBe(0);
+  });
+
+  it("Workflow 플러그인 소스: 노드 업그레이드 함수가 번들러 도우미 없이 그대로 들어간다", () => {
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("const upgradePerdixNodes = function upgradePerdixNodes(");
+    expect(WORKFLOW_PLUGIN_SOURCE).not.toMatch(/__name\(|__publicField/);
+  });
+
+  it("Workflow 캔버스: 스크롤바가 늘 보이고, 가운데 버튼이나 Space를 누른 채 끌면 화면을 옮긴다", () => {
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("className: 'perdix-wf-canvas'");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain(".perdix-wf-canvas::-webkit-scrollbar");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("event.button === 1 || (event.button === 0 && spaceDown)");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("CANVAS_SCROLL_ROOM");
+  });
+
+  it("Workflow 오른쪽 패널: 왼쪽 경계선을 끌어 너비를 바꾸고 그 값을 기억한다", () => {
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("jsx(PanelResizer, { width: panelWidth, onResize: setPanelWidth })");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("cursor: 'col-resize'");
+    expect(WORKFLOW_PLUGIN_SOURCE).toContain("window.localStorage.setItem(RIGHT_PANEL_KEY");
   });
 
   it("설정 정리: 연결 안 된 메뉴 묶음과 하위 항목만 감추고, Model·Appearance 등은 남긴다", () => {

@@ -17,6 +17,42 @@
  */
 export const WORKFLOW_PLUGIN_ID = "workflow";
 
+type TemplateField = { value?: unknown };
+type ComponentTemplate = { template?: Record<string, TemplateField> } & Record<string, unknown>;
+type FlowNode = { id: string; data?: { type?: string; node?: ComponentTemplate } } & Record<string, unknown>;
+type FlowData = { nodes: FlowNode[] } & Record<string, unknown>;
+
+/**
+ * 플로우에 저장된 예전 Perdix 컴포넌트 노드를 Langflow가 지금 가진 컴포넌트로 바꾼다.
+ * Langflow는 노드에 컴포넌트 코드와 칸 목록을 통째로 저장하므로, 컴포넌트에 칸을 더해도
+ * 기존 노드는 모른다. 코드가 다른 노드만 최신 정의로 갈아 끼우고, 두 쪽에 다 있는 칸의 값
+ * (Role·Model 등)은 그대로 옮긴다. 노드 id와 연결선은 건드리지 않는다.
+ * 플러그인 소스에 toString()으로 들어가므로 바깥 이름을 참조하지 않는다.
+ */
+export function upgradePerdixNodes(flowData: FlowData, components: Record<string, Record<string, ComponentTemplate>> | null): { data: FlowData; count: number } {
+  const latest = (components && components.perdix) || {};
+  let count = 0;
+  const nodes = flowData.nodes.map((node) => {
+    const type = node.data && node.data.type;
+    const current = node.data && node.data.node;
+    const next = type ? latest[type] : undefined;
+    if (!type || !current || !next || !next.template) return node;
+    const oldTemplate = current.template || {};
+    const codeOf = (template: Record<string, TemplateField>) => (template.code ? template.code.value : undefined);
+    if (codeOf(oldTemplate) === codeOf(next.template)) return node;
+    const upgraded = JSON.parse(JSON.stringify(next)) as ComponentTemplate & { template: Record<string, TemplateField> };
+    for (const key of Object.keys(upgraded.template)) {
+      const field = upgraded.template[key];
+      const old = oldTemplate[key];
+      if (key === "code" || key === "_type" || !field || !old || !("value" in old)) continue;
+      field.value = old.value;
+    }
+    count += 1;
+    return { ...node, data: { ...node.data, node: upgraded } };
+  });
+  return { data: count > 0 ? { ...flowData, nodes } : flowData, count };
+}
+
 export const WORKFLOW_PLUGIN_SOURCE = `import { atom, useValue, Button, Input, SearchField, Textarea } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
 import { useEffect, useRef, useState } from 'react'
@@ -24,6 +60,8 @@ import { useEffect, useRef, useState } from 'react'
 const PATH = '/workflow'
 const state = atom({ roles: [] })
 let rest = null
+
+const upgradePerdixNodes = ${upgradePerdixNodes.toString()}
 
 async function refresh() {
   const roles = await rest('/roles').catch(() => [])
@@ -121,6 +159,12 @@ const ROW_HEIGHT = 22
 const HEADER_HEIGHT = 32
 const NODE_WIDTH = 220
 const CANVAS_MARGIN = 40
+// 마지막 노드 너머로 남겨 두는 스크롤 여유. 노드를 가장자리 밖으로 끌어 옮길 자리이기도 하다.
+const CANVAS_SCROLL_ROOM = 480
+// macOS 오버레이 스크롤바는 평소에 숨어 있어 캔버스가 스크롤되는지 알 수 없다. 늘 보이게 그린다.
+const CANVAS_SCROLLBAR_CSS = '.perdix-wf-canvas::-webkit-scrollbar{width:10px;height:10px}' +
+  '.perdix-wf-canvas::-webkit-scrollbar-thumb{background:var(--ui-border, #555);border-radius:5px;border:2px solid transparent;background-clip:padding-box}' +
+  '.perdix-wf-canvas::-webkit-scrollbar-corner{background:transparent}'
 
 /** 입력 포트를 먼저 쌓고 출력 포트를 그 아래 이어 그리므로(NodeBox 참고), 출력의 행 번호는
  *  입력 개수만큼 밀어야 한다. */
@@ -207,6 +251,38 @@ function RelayModelInput({ field, relayUrl, onChange }) {
   ] })
 }
 
+// Perdix Agent의 Instructions 칸. 비어 있으면 역할 원본 시스템 프롬프트를 칸에 그대로 보여 준다(값은 비운 채라
+// 원본을 따라간다). 칸에서 고치면 그 글이 이 노드 전용 값이 되고, 원본과 같아지면 다시 비운다.
+// 값은 플로우에 저장되므로 원본은 그대로다.
+function RelayPromptInput({ field, relayUrl, role, onChange }) {
+  const [original, setOriginal] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!relayUrl || !role) { setOriginal(null); setError('중계 주소와 역할이 필요합니다.'); return }
+    setOriginal(null); setError('')
+    rest('/relay/prompt?url=' + encodeURIComponent(relayUrl) + '&role=' + encodeURIComponent(role)).then((response) => {
+      if (response.ok) setOriginal(response.result)
+      else setError(response.detail || response.error)
+    }).catch(() => setError('원본을 받지 못했습니다.'))
+  }, [relayUrl, role])
+  const value = field.value == null ? '' : String(field.value)
+  const custom = value.trim() !== ''
+  const shown = custom ? value : (original || '')
+  const onEdit = (text) => onChange(original !== null && text === original ? '' : text)
+  return jsxs('div', { style: { display: 'flex', flexDirection: 'column', gap: '0.25rem' }, children: [
+    jsx(Textarea, { value: shown, rows: 14, readOnly: !custom && original === null,
+      placeholder: error ? '원본을 받지 못했습니다. 여기에 쓰면 이 워크플로 전용 지시문이 됩니다.' : '원본 시스템 프롬프트를 불러오는 중…',
+      style: { resize: 'vertical', fontSize: '0.75rem', fontFamily: 'ui-monospace, monospace', opacity: custom ? 1 : 0.85 },
+      onChange: (event) => onEdit(event.target.value) }),
+    custom ? jsx('div', { children: jsx(Button, { size: 'xs', variant: 'ghost', title: '고친 내용을 지우고 역할 원본을 씁니다',
+      onClick: () => onChange(''), children: '원본으로 되돌리기' }) }) : null,
+    jsx('span', { style: { fontSize: '0.6875rem', color: custom ? T.text : T.textFaint }, children:
+      custom ? '수정됨: 이 워크플로에서만 이 지시문을 씁니다. 원본은 바뀌지 않으며, 원본이 바뀌어도 따라오지 않습니다. 저장해야 반영됩니다.'
+        : error ? '원본을 받지 못했습니다: ' + error
+        : '역할(' + role + ')의 원본입니다. 여기서 고치면 이 워크플로 전용이 됩니다.' }),
+  ] })
+}
+
 function FieldInput({ field, onChange }) {
   const type = field.type
   if (type === 'bool') {
@@ -261,7 +337,9 @@ function FieldRow({ node, entry, onChangeField }) {
     jsx('span', { style: { color: T.textSoft }, children: field.display_name || key }),
     key === 'model_override'
       ? jsx(RelayModelInput, { field, relayUrl: templateValue(node, 'relay_url'), onChange: (value) => onChangeField(node.id, key, value) })
-      : jsx(FieldInput, { field, onChange: (value) => onChangeField(node.id, key, value) }),
+      : key === 'instructions_override'
+        ? jsx(RelayPromptInput, { field, relayUrl: templateValue(node, 'relay_url'), role: templateValue(node, 'role'), onChange: (value) => onChangeField(node.id, key, value) })
+        : jsx(FieldInput, { field, onChange: (value) => onChangeField(node.id, key, value) }),
   ] })
 }
 
@@ -276,7 +354,8 @@ function PropertyPanel({ node, onChangeField, onDeleteNode }) {
   const editable = templateEntries(node).filter(({ key, field }) => !isPortField(field) && key !== 'code')
   const basic = editable.filter(({ field }) => field.advanced !== true)
   const advanced = editable.filter(({ field }) => field.advanced === true)
-  return jsxs('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0 }, children: [
+  // flex: 1로 오른쪽 열 높이에 맞춰야 아래 목록이 열 밖으로 넘치지 않고 스크롤된다.
+  return jsxs('div', { style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }, children: [
     jsxs('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.6rem 0.75rem', borderBottom: '1px solid ' + T.border }, children: [
       jsx('strong', { style: { fontSize: '0.8125rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: nodeTitle(node) }),
       jsx(Button, { size: 'xs', variant: 'destructive', title: 'Delete 키로도 지울 수 있습니다', onClick: () => onDeleteNode(node.id), children: '삭제' }),
@@ -449,8 +528,45 @@ function NodeBox({ node, origin, selected, inherited, connected, onSelect, onSta
 
 function Canvas({ flowData, origin, selectedIds, onSelectNode, onBoxSelect, onStartDrag, onStartConnect, pendingLine }) {
   const [marquee, setMarquee] = useState(null)
+  const [spaceDown, setSpaceDown] = useState(false)
+  const [panning, setPanning] = useState(false)
   const innerRef = useRef(null)
+  const scrollRef = useRef(null)
+  // Space를 누르고 있으면 빈 곳 끌기가 사각형 선택 대신 화면 이동이 된다. 입력 칸에서 친 Space는 무시한다.
+  useEffect(() => {
+    const typing = (event) => {
+      const tag = event.target && event.target.tagName
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || (event.target && event.target.isContentEditable)
+    }
+    const down = (event) => { if (event.code === 'Space' && !typing(event)) { event.preventDefault(); setSpaceDown(true) } }
+    const up = (event) => { if (event.code === 'Space') setSpaceDown(false) }
+    const blur = () => setSpaceDown(false)
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', blur)
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur) }
+  }, [])
+  const startPan = (event) => {
+    const scroller = scrollRef.current
+    if (!scroller) return
+    event.preventDefault()
+    const start = { x: event.clientX, y: event.clientY, left: scroller.scrollLeft, top: scroller.scrollTop }
+    setPanning(true)
+    const onMove = (moveEvent) => {
+      scroller.scrollLeft = start.left - (moveEvent.clientX - start.x)
+      scroller.scrollTop = start.top - (moveEvent.clientY - start.y)
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setPanning(false)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
   const onBackgroundPointerDown = (event) => {
+    // 가운데 버튼 끌기, 또는 Space를 누른 채 끌기는 화면 이동이다.
+    if (event.button === 1 || (event.button === 0 && spaceDown)) { startPan(event); return }
     if (event.button !== 0 || !innerRef.current) return
     const additive = isAdditive(event)
     const rect = innerRef.current.getBoundingClientRect()
@@ -496,15 +612,19 @@ function Canvas({ flowData, origin, selectedIds, onSelectNode, onBoxSelect, onSt
     const to = portPoint(target, 'input', nodePortRow(target, 'input', targetHandle.fieldName, connected), origin)
     return { id: edge.id, d: bezier(from, to) }
   }).filter(Boolean)
-  const maxX = nodes.reduce((max, node) => Math.max(max, ((node.position && node.position.x) || 0) + origin.x + NODE_WIDTH + CANVAS_MARGIN * 2), 0)
-  const maxY = nodes.reduce((max, node) => Math.max(max, ((node.position && node.position.y) || 0) + origin.y + 260), 0)
-  return jsx('div', {
+  const maxX = nodes.reduce((max, node) => Math.max(max, ((node.position && node.position.x) || 0) + origin.x + NODE_WIDTH + CANVAS_SCROLL_ROOM), 0)
+  const maxY = nodes.reduce((max, node) => Math.max(max, ((node.position && node.position.y) || 0) + origin.y + nodeHeight(node, connected) + CANVAS_SCROLL_ROOM), 0)
+  return jsxs('div', {
+    ref: scrollRef, className: 'perdix-wf-canvas',
     style: {
-      position: 'relative', flex: 1, minWidth: 0, overflow: 'auto', background: T.surface,
+      position: 'relative', flex: 1, minWidth: 0, overflow: 'scroll', background: T.surface,
       backgroundImage: 'radial-gradient(' + T.strokeSoft + ' 1px, transparent 1px)', backgroundSize: '20px 20px',
+      cursor: panning ? 'grabbing' : spaceDown ? 'grab' : undefined,
     },
     onPointerDown: onBackgroundPointerDown,
-    children: jsxs('div', { ref: innerRef, style: { position: 'relative', width: maxX, height: maxY, minWidth: '100%', minHeight: '100%' }, children: [
+    // 가운데 버튼 끌기에서 브라우저 자동 스크롤 표시가 뜨지 않게 막는다.
+    onMouseDown: (event) => { if (event.button === 1) event.preventDefault() },
+    children: [jsx('style', { children: CANVAS_SCROLLBAR_CSS }), jsxs('div', { ref: innerRef, style: { position: 'relative', width: maxX, height: maxY, minWidth: '100%', minHeight: '100%' }, children: [
       jsxs('svg', { style: { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }, children: [
         edgeLines.map((line) => jsx('path', { key: line.id, d: line.d, stroke: T.good, strokeWidth: 1.5, fill: 'none', opacity: 0.8 })),
         pendingLine ? jsx('path', { d: bezier(pendingLine.from, pendingLine.to), stroke: T.accent, strokeWidth: 1.5, strokeDasharray: '4 3', fill: 'none' }) : null,
@@ -517,7 +637,7 @@ function Canvas({ flowData, origin, selectedIds, onSelectNode, onBoxSelect, onSt
         position: 'absolute', left: marquee.x1, top: marquee.y1, width: marquee.x2 - marquee.x1, height: marquee.y2 - marquee.y1,
         border: '1px dashed ' + T.accent, background: 'color-mix(in srgb, ' + T.accent + ' 10%, transparent)', pointerEvents: 'none',
       } }) : null,
-    ] }),
+    ] })],
   })
 }
 
@@ -526,8 +646,48 @@ function Centered({ children }) {
   return jsx('div', { style: { flex: 1, display: 'grid', placeItems: 'center', padding: '1rem', textAlign: 'center', fontSize: '0.8125rem', color: T.textFaint }, children })
 }
 
+// 오른쪽 패널 너비는 왼쪽 경계선을 끌어 바꾼다. 정한 값은 다음에 열 때도 쓴다.
+const RIGHT_PANEL_KEY = 'perdix.workflow.rightPanelWidth'
+const RIGHT_PANEL_DEFAULT = 384
+const RIGHT_PANEL_MIN = 260
+const clampPanelWidth = (width) => Math.round(Math.min(Math.max(width, RIGHT_PANEL_MIN), Math.max(RIGHT_PANEL_MIN, window.innerWidth * 0.7)))
+function savedPanelWidth() {
+  try {
+    const saved = Number(window.localStorage.getItem(RIGHT_PANEL_KEY))
+    return saved > 0 ? clampPanelWidth(saved) : RIGHT_PANEL_DEFAULT
+  } catch (error) { return RIGHT_PANEL_DEFAULT }
+}
+
+function PanelResizer({ width, onResize }) {
+  const [active, setActive] = useState(false)
+  const onPointerDown = (event) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = width
+    let latest = width
+    setActive(true)
+    const onMove = (moveEvent) => { latest = clampPanelWidth(startWidth + (startX - moveEvent.clientX)); onResize(latest) }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      setActive(false)
+      try { window.localStorage.setItem(RIGHT_PANEL_KEY, String(latest)) } catch (error) { /* 저장 못 해도 이번 화면에는 적용된다 */ }
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  return jsx('div', {
+    title: '끌어서 너비 조절 · 두 번 누르면 기본 너비',
+    onPointerDown,
+    onDoubleClick: () => { onResize(RIGHT_PANEL_DEFAULT); try { window.localStorage.removeItem(RIGHT_PANEL_KEY) } catch (error) { /* 무시 */ } },
+    style: { position: 'absolute', left: -3, top: 0, bottom: 0, width: 6, cursor: 'col-resize', zIndex: 2,
+      background: active ? T.accent : 'transparent', opacity: active ? 0.6 : 1 },
+  })
+}
+
 const columnStyle = (side) => ({
-  width: side === 'left' ? '13rem' : '16rem', flex: 'none', minHeight: 0, display: 'flex', flexDirection: 'column',
+  width: side === 'left' ? '13rem' : RIGHT_PANEL_DEFAULT, flex: 'none', minHeight: 0, display: 'flex', flexDirection: 'column',
   background: T.panel, [side === 'left' ? 'borderRight' : 'borderLeft']: '1px solid ' + T.border,
 })
 
@@ -546,6 +706,7 @@ function WorkflowEditor({ langflowEnabled, roles }) {
   const [newFlowName, setNewFlowName] = useState(null)
   // 플로우 삭제 확인: true면 헤더에 "지울까요?"와 삭제·취소 버튼이 열린 상태.
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [panelWidth, setPanelWidth] = useState(savedPanelWidth)
   const connectingRef = useRef(null)
 
   const loadFlows = () => rest('/langflow/flows').then((response) => {
@@ -602,6 +763,15 @@ function WorkflowEditor({ langflowEnabled, roles }) {
       })
     })
   }
+
+  // 예전 Perdix Agent 노드(새 칸이 없는 코드)는 열 때 최신 컴포넌트로 바꿔 둔다. 저장해야 Langflow에 남는다.
+  useEffect(() => {
+    if (!flowData || !components) return
+    const result = upgradePerdixNodes(flowData, components)
+    if (result.count === 0) return
+    setFlowData(result.data)
+    setStatus('Perdix 노드 ' + result.count + '개를 최신 버전으로 바꿨습니다. 저장하면 반영됩니다.')
+  }, [flowData, components])
 
   const mutateFlow = (updater) => setFlowData((current) => (current ? updater(current) : current))
 
@@ -772,7 +942,10 @@ function WorkflowEditor({ langflowEnabled, roles }) {
       flowData
         ? jsx(Canvas, { flowData, origin, selectedIds, onSelectNode, onBoxSelect, onStartDrag, onStartConnect, pendingLine })
         : jsx(Centered, { children: flows.length === 0 ? 'Langflow에 플로우가 없습니다. 위 헤더의 "+ 새 플로우"로 만드세요.' : '위 헤더에서 플로우를 선택하면 왼쪽 컴포넌트를 캔버스에 추가할 수 있습니다.' }),
-      jsx('aside', { style: columnStyle('right'), children: rightPanel }),
+      jsxs('aside', { style: { ...columnStyle('right'), position: 'relative', width: panelWidth }, children: [
+        jsx(PanelResizer, { width: panelWidth, onResize: setPanelWidth }),
+        rightPanel,
+      ] }),
     ] })
   }
 

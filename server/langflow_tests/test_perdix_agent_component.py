@@ -5,6 +5,7 @@
 확인하는 것은 컴포넌트 자신의 규칙뿐이다.
 - Model 칸이 비면 역할 할당(`perdix:role/<역할>`), 값이 있으면 그 모델(`perdix:<모델>`)
 - Model 칸 새로고침은 중계 `/v1/models` 목록으로 채우고, 실패하면 비운다
+- Instructions 칸이 비면 역할 원본 시스템 프롬프트, 값이 있으면 그 글(워크플로 전용)
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def _stub_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         pass
 
     lfx_io = types.ModuleType("lfx.io")
-    for name in ("DropdownInput", "Output", "SecretStrInput", "StrInput"):
+    for name in ("DropdownInput", "MultilineInput", "Output", "SecretStrInput", "StrInput"):
         setattr(lfx_io, name, _Field)
     component_mod = types.ModuleType("lfx.custom.custom_component.component")
     component_mod.Component = _Component  # type: ignore[attr-defined]
@@ -111,3 +112,40 @@ def test_refresh_clears_options_when_relay_is_down(component_module: types.Modul
     config = {"model_override": {"options": ["stale"]}}
     _component(component_module).update_build_config(config, "", "model_override")
     assert config["model_override"]["options"] == []
+
+
+def _definition_response(url: str) -> httpx.Response:
+    body = {"role": "build", "model": "openai/gpt-6-luna", "systemPrompt": "ORIGINAL PROMPT",
+            "tools": []}
+    return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+
+def test_instructions_field_is_plain_and_empty_by_default(
+        component_module: types.ModuleType) -> None:
+    fields = {f.name: f for f in component_module.PerdixAgentComponent.inputs}
+    assert fields["instructions_override"].value == ""
+    # 포트가 아니라 직접 쓰는 칸이어야 편집기 속성 패널에 보인다.
+    assert fields["instructions_override"].input_types == []
+
+
+def test_empty_instructions_use_role_prompt(component_module: types.ModuleType,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(component_module.httpx, "get",
+                        lambda url, headers, timeout: _definition_response(url))
+    component = _component(component_module)
+    component.role = "build"
+    for blank in ("", "  \n ", None):
+        component.instructions_override = blank
+        assert component.get_instructions().text == "ORIGINAL PROMPT"
+    assert component.status == "build / openai/gpt-6-luna"
+
+
+def test_written_instructions_replace_role_prompt(component_module: types.ModuleType,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(component_module.httpx, "get",
+                        lambda url, headers, timeout: _definition_response(url))
+    component = _component(component_module)
+    component.role = "build"
+    component.instructions_override = "이 워크플로에서만 쓰는 지시문\n"
+    assert component.get_instructions().text == "이 워크플로에서만 쓰는 지시문\n"
+    assert component.status == "build / openai/gpt-6-luna / 워크플로 전용 지시문"
